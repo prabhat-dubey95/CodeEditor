@@ -403,3 +403,7 @@ form button:hover {
     margin-top: 5px;
     line-height: 1.3;
 }
+.refresh-btn {
+    height: 22px;   
+    width: 22px;
+}

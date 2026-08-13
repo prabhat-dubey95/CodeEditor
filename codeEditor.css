@@ -786,9 +786,20 @@ body.logged-in #loginOverlay {
   color: #fff;
 }
 .tab-close {
+  font-weight: 600;
   color: #999;
   cursor: pointer;
+  visibility: hidden;
 }
+
+.tab.active .tab-close {
+  visibility: visible;
+}
+
+.tab:hover .tab-close {
+  visibility: visible;
+}
+
 .tab-close:hover {
   color: #fff;
 }
@@ -1224,22 +1235,20 @@ body.logged-in #loginOverlay {
   font-weight: 500;
 }
 
-#projectCreateModal input,
-#projectCreateModal select {
-    width: 100%;
-    height: 30px;
-    padding: 0 12px;
-    border: 1px solid #d6d6d6;
-    border-radius: 4px;
-    box-sizing: border-box;
-    font-size: 13px;
-    background: #fff;
+#projectCreateModal input,#projectCreateModal select {
+  width: 100%;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #d6d6d6;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-size: 13px;
+  background: #fff;
 }
 
-#projectCreateModal input:focus,
-#projectCreateModal select:focus {
-    outline: none;
-    border-color: #4f8ef7;
+#projectCreateModal input:focus,#projectCreateModal select:focus {
+  outline: none;
+  border-color: #4f8ef7;
 }
 
 #projectCreateModal .modal-buttons {
@@ -1294,7 +1303,6 @@ body.logged-in #loginOverlay {
 .enterprise-dropdown-list .search {
   width: calc(100% - 13px);
   height: 30px;
-
   padding: 0 5px;
 }
 /* Options Container */
@@ -1334,12 +1342,6 @@ body.logged-in #loginOverlay {
   flex: 1;
   margin-top: 0;
 }
-/* .live-website-select-row {
-  padding-left: 5px;
-}
-.brand-section {
-  padding-right: 5px;
-} */
 .live-website-select-row .enterprise-dropdown-wrapper {
   width: 100%;
 }
@@ -1384,73 +1386,68 @@ body.logged-in #loginOverlay {
   font-size: 14px;
 }
 #liveWebsiteBrandInput.loading {
-    position: relative;
-    pointer-events: none;
-    opacity: 0.7;
+  position: relative;
+  pointer-events: none;
+  opacity: 0.7;
 }
-
 /* Overlay */
 #liveWebsiteBrandInput.loading::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: rgba(255,255,255,0.55);
-    border-radius: 4px;
-    z-index: 9;
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.55);
+  border-radius: 4px;
+  z-index: 9;
 }
 
 /* Loader */
 #liveWebsiteBrandInput.loading::after {
-    content: "";
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    width: 14px;
-    height: 14px;
-    margin-top: -7px;
-    border: 2px solid #d9d9d9;
-    border-top-color: #3b82f6;
-    border-radius: 50%;
-    animation: spin .8s linear infinite;
-    z-index: 11;
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: 2px solid #d9d9d9;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  z-index: 11;
 }
-
 /* Hide dropdown arrow while loading */
 #liveWebsiteBrandInput.loading .arrow {
-    visibility: hidden;
+  visibility: hidden;
 }
-
 @keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .dropdown-icon {
   width: 18px;
   height: 18px;
   fill: currentColor;
 }
-
 .arrow {
   display: flex;
   align-items: center;
 }
 .-add-items-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 .refresh-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #ccc;
 }
-
 .refresh-icon {
   width: 16px;
   height: 16px;
