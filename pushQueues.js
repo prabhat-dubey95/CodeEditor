@@ -3,40 +3,58 @@
   var pushQueuesContent = function () {
     this.useCloudName = "Push Queues";
     this.mainCloudDRI = null;
-    this.cloudDRI = null; 
+    this.cloudDRI = null;
     this.activeTab = null;
+
     this.selectedClouds = new Map();
     this.isMultiSelectMode = false;
     this.selectedItems = new Map();
-    this.queueGroupsCache = null;   
+
+    this.queueGroupsCache = null;
     this.queueGroupsDRI = null;
+
     this.cloudPage = 1;
     this.hasMoreClouds = true;
     this.isLoadingClouds = false;
     this.selectedGroup = "All";
+    this.initialized = false;
+    this.initPromise = null;
+    // Push Queue list cache
+    this.pushQueueClouds = [];
+    // Selected Push Queue
+    this.tableItems = [];
+    this.selectedCloud = null;
+    this.selectedCloudName = "";
+    this.selectedCloudDRI = null;
+    this.isDataLoaded = false;
+    this.isLoading = false;
+    this.lastLoadedTableDRI = null;
+    this.tableCache = new Map();
+    this.isTableLoading = false;
+
     this.init();
   };
   pushQueuesContent.prototype = {
     init: async function () {
-        try {
-            codeEditor.activeLeftPanelTab = "pushQueues";
-            utils.showContextLoader();
-            await this.loginToLiveHRMS();
-            this.loadMainCloud();
-            //this.toggleAddButtonVisibility();
-            utils.resizarFunction({
-                resizer: "#leftResizer",
-                left: ".clouds-section",
-                minWidth: 300,
-                maxWidth: 400
-            });
-            this.attachEvents();
-        } catch (err) {
-            console.error("PushQueues Init Error:", err);
+        if (this.initPromise) {
+            return this.initPromise;
         }
-        finally {
-            utils.hideContextLoader();
-        }
+
+        this.initPromise = (async function () {
+            try {
+                codeEditor.activeLeftPanelTab = "pushQueues";
+                utils.showContextLoader();
+                await this.loginToLiveHRMS();
+                await this.loadMainCloud();
+                this.attachEvents();
+                this.initialized = true;
+            } catch (err) {
+                console.error("PushQueues Init Error:", err);
+            } finally {
+                utils.hideContextLoader();
+            }
+        }).call(this);
+        return this.initPromise;
     },
     attachEvents: function () {
         this.attachClickEvents();
@@ -64,7 +82,6 @@
 
         if (addItemBtn && itemPopup) {
             addItemBtn.onclick = function () {
-                console.log("Add Item button clicked");
                 itemPopup.style.display = "flex";
             };
         }
@@ -82,13 +99,6 @@
                 }
             }
         });
-
-        // if (editItemRightBtn && contextPopup) {
-        //     editItemRightBtn.onclick = function () {
-        //         console.log("Edit Item button clicked");
-        //         contextPopup.style.display = "flex";
-        //     };
-        // }
 
         if (contextPopup) {
             contextPopup.onclick = function (event) {
@@ -113,96 +123,139 @@
       var data = await response.json();
       LIVEHRMS_USER_DATA = data.Result || {};
     },
-    loadMainCloud: function (refresh) {
+    loadMainCloud: async function (refresh) {
         var self = this;
-
-        var cloudList = document.getElementById("cloudList");
-        var tableContainer = document.getElementById("pushQueueItemsTableContainer");
-
-        // Show loader on common context area
-        utils.showContextLoader();
-
-        if (cloudList) {
-            cloudList.innerHTML = "";
-        }
-
-        if (tableContainer) {
-            tableContainer.innerHTML = "<div class='no-items'>Select a Push Queue</div>";
-        }
-        // Reset selected queue
-        self.cloudDRI = null;
-        self.tableItems = [];
-
-        var userDRI = LIVEHRMS_USER_DATA && LIVEHRMS_USER_DATA["Direct Resource Identifier"];
-
-        if (!userDRI) {
-            console.warn("User DRI not found.");
-
-            if (cloudList) {
-                cloudList.innerHTML = "<div class='no-items'>User DRI Not Found</div>";
-            }
-            utils.hideContextLoader();
+        if (self.isDataLoaded && !refresh) {
+            console.log("Push Queue list already loaded - using cache");
+            self.restoreSelectedQueue();
             return;
         }
-        utils.getCloud(userDRI, self.useCloudName).then(function (cloud) {
+        if (self.isLoading) {
+
+            console.log(
+                "Push Queue list is already loading"
+            );
+
+            return;
+        }
+
+        self.isLoading = true;
+        var cloudList = document.getElementById("cloudList");
+        utils.showContextLoader();
+
+        try {
+            var userDRI = LIVEHRMS_USER_DATA &&LIVEHRMS_USER_DATA["Direct Resource Identifier"];
+            if (!userDRI) {
+                console.warn("User DRI not found.");
+                if (cloudList) {
+                    cloudList.innerHTML = "<div class='no-items'>User DRI Not Found</div>";
+                }
+                return;
+            }
+            var cloud = await utils.getCloud(userDRI,self.useCloudName);
             if (!cloud || !cloud.DRI) {
                 if (cloudList) {
                     cloudList.innerHTML = "<div class='no-items'>No Push Queues Found</div>";
                 }
-                return null;
-            }
-            self.mainCloudDRI = cloud.DRI;
-            return utils.getItems(cloud.DRI,"Name||Description||Created By||Created On||Last Pushed To||Last Pushed On||Push Queue Group",true,1,9999);
-        })
-        .then(function (data) {
-            if (!data) {
                 return;
             }
-            var clouds = data.Results || [];
+            self.mainCloudDRI = cloud.DRI;
+            console.log("Loading Push Queue list from API");
+            var data = await utils.getItems(cloud.DRI,"Name||Description||Created By||Created On||Last Pushed To||Last Pushed On||Push Queue Group",true,1,9999);
+            var clouds = data && data.Results? data.Results: [];
             self.pushQueueClouds = clouds;
+            self.isDataLoaded = true;
+
+            console.log("Push Queue list loaded:",clouds.length);
             self.initializeGroupDropdown();
             self.setupCloudSearch();
-        })
-        .catch(function (err) {
-            console.error("Push Queues Load Error:", err);
+            self.restoreSelectedQueue();
+
+        } catch (err) {
+            console.error("Push Queue load error:",err);
             if (cloudList) {
                 cloudList.innerHTML = "<div class='no-items'>Failed to load Push Queues</div>";
             }
-        })
-        .finally(function () {
-            // Hide loader after everything is finished
+
+        } finally {
+            self.isLoading = false;
             utils.hideContextLoader();
-        });
+        }
     },
-    drawCloudList: async function (items) {
+    restoreSelectedQueue: function () {
+        var self = this;
+        var queues = self.pushQueueClouds || [];
+        if (!queues.length) {
+            return;
+        }
+        var savedDRI = localStorage.getItem("activePushQueue");
+        var selectedItem = null;
+
+        if (savedDRI) {
+            selectedItem = queues.find(function (item) {
+                return (item.DRI === savedDRI ||item["Direct Resource Identifier"] === savedDRI);
+            });
+        }
+        if (!selectedItem && self.selectedCloudDRI) {
+            selectedItem = queues.find(function (item) {
+                return (item.DRI === self.selectedCloudDRI ||item["Direct Resource Identifier"] === self.selectedCloudDRI);
+            });
+        }
+
+        if (!selectedItem) {
+            selectedItem = queues[0];
+        }
+
+        var selectedDRI = selectedItem.DRI ||selectedItem["Direct Resource Identifier"];
+        if (!selectedDRI) {
+            return;
+        }
+        self.selectedCloud = selectedItem;
+
+        self.selectedCloudName = selectedItem.Name || "Unnamed";
+
+        self.selectedCloudDRI = selectedDRI;
+        self.cloudDRI = selectedDRI;
+        self.drawCloudList(queues,true);
+    },
+    drawCloudList: async function (items, restoreOnly) {
         var cloudList = document.getElementById("cloudList");
         if (!cloudList) {
             return;
         }
         cloudList.innerHTML = "";
         var self = this;
-        var firstRow = null;
-        var firstItem = null;
-        var firstCloudDRI = null;
+        var savedDRI = localStorage.getItem("activePushQueue");
 
-        (items || []).forEach(function (item, index) {
+        var selectedDRI = self.selectedCloudDRI ||self.cloudDRI ||savedDRI;
+        var selectedRow = null;
+        var selectedItem = null;
+        (items || []).forEach(function (item) {
             var row = document.createElement("div");
             row.className = "tree-node -cloud-item";
-            // var name = item.Name ||"Unnamed";
-            // var cloudDRI = item.DRI ||item["Direct Resource Identifier"] ||"";
-            // row.innerHTML = `<span class="label">${name}</span>`;
             var name = item.Name || "Unnamed";
             var groupName = item["Push Queue Group"] || "";
-            var cloudDRI = item.DRI || item["Direct Resource Identifier"] || "";
+            var cloudDRI = item.DRI ||item["Direct Resource Identifier"] || "";
 
             row.innerHTML = `
                 <div class="queue-name">${name}</div>
-                ${groupName ? `<div class="queue-group">Group: ${groupName}</div>` : ""}
+                ${
+                    groupName? `<div class="queue-group">Group: ${groupName}</div>`: ""
+                }
             `;
+
+            if (selectedDRI && cloudDRI === selectedDRI) {
+                row.classList.add("selected");
+                row.classList.add("active-item");
+                selectedRow = row;
+                selectedItem = item;
+            }
+
             row.onclick = async function () {
                 cloudList.querySelectorAll(".-cloud-item").forEach(function (x) {
                     x.classList.remove("selected");
                     x.classList.remove("active-item");
+
                 });
 
                 row.classList.add("selected");
@@ -210,32 +263,59 @@
 
                 self.selectedCloud = item;
                 self.selectedCloudName = name;
-                console.log("Selected Queue:",item);
-                console.log("Queue DRI:",cloudDRI);
+                self.selectedCloudDRI = cloudDRI;
+                self.cloudDRI = cloudDRI;
 
+                localStorage.setItem("activePushQueue",cloudDRI);
                 if (!cloudDRI) {
-                    console.warn("Queue DRI missing:",item);
                     return;
                 }
-                await self.loadTable(cloudDRI);
-            };
 
+                if (self.lastLoadedTableDRI !== cloudDRI) {
+                    await self.loadTable(cloudDRI);
+                } else {
+                    console.log("Same queue selected - using table cache");
+                    self.renderTable(self.tableItems || []);
+                    self.setupTableSearch();
+                }
+            };
             cloudList.appendChild(row);
-            // Save first valid cloud
-            if (!firstRow && cloudDRI) {
-                firstRow = row;
-                firstItem = item;
-                firstCloudDRI = cloudDRI;
-            }
         });
-        // Default active cloud
-        if (firstRow &&firstItem &&firstCloudDRI) {
-            firstRow.classList.add("selected");
-            firstRow.classList.add("active-item");
-            self.selectedCloud = firstItem;
-            self.selectedCloudName = firstItem.Name ||"Unnamed";
-            console.log("Default Selected Queue:",firstItem);
-            await self.loadTable(firstCloudDRI);
+
+        if (selectedRow && selectedItem && selectedDRI) {
+
+            self.selectedCloud = selectedItem;
+            self.selectedCloudName = selectedItem.Name ||"Unnamed";
+            self.selectedCloudDRI = selectedDRI;
+            self.cloudDRI = selectedDRI;
+
+            if (self.lastLoadedTableDRI !== selectedDRI) {
+                await self.loadTable(selectedDRI);
+            } else {
+                console.log("Restored queue already loaded - no API call");
+                self.renderTable(self.tableItems || []);
+                self.setupTableSearch();
+            }
+            return;
+        }
+        if (!selectedRow && items && items.length) {
+            var firstItem = items[0];
+            var firstDRI = firstItem.DRI ||firstItem["Direct Resource Identifier"];
+            var firstRow = cloudList.querySelector(".-cloud-item");
+
+            if (firstRow && firstDRI) {
+                firstRow.classList.add("selected");
+                firstRow.classList.add("active-item");
+
+                self.selectedCloud = firstItem;
+                self.selectedCloudName = firstItem.Name ||"Unnamed";
+                self.selectedCloudDRI = firstDRI;
+
+                self.cloudDRI = firstDRI;
+                localStorage.setItem("activePushQueue",firstDRI);
+
+                await self.loadTable(firstDRI);
+            }
         }
     },
     loadTable: async function (cloudDRI) {
@@ -246,136 +326,75 @@
 
         var self = this;
         var box = document.getElementById("commonContextBox");
+
+        if (box) {
+            box.style.display = "block";
+        }
         var commonLabel = document.getElementById("commonSourceLabel");
         var searchInput = document.getElementById("commonSearchInput");
         var tableContainer = document.getElementById("commonTableContainer");
+
         var addItemsRightBtn = document.getElementById("addItemsRightBtn");
+
         var contextPopup = document.getElementById("contextPopup");
 
-        var info = document.getElementById("pushQueueInfo");
-        var lastPushedBy = document.getElementById("lastPushedBy");
-        var lastPushedOn = document.getElementById("lastPushedOn");
-
-        var pushToQABtn = document.getElementById("pushToQABtn");
-        var pushToPreBtn = document.getElementById("pushToPreBtn");
-        var pushToLiveBtn = document.getElementById("pushToLiveBtn");
-
         if (!box || !tableContainer) {
+            console.warn("commonContextBox/commonTableContainer not found");
             return;
         }
+        self.cloudDRI = cloudDRI;
 
-        box.style.display = "block";
-
-        // if (commonLabel) {
-        //     commonLabel.textContent = this.selectedCloudName || "";
-        // }
         if (commonLabel) {
-            var label = this.selectedCloudName || "";
-
-            if (this.selectedGroupName) {
-                label += " (Group : " + this.selectedGroupName + ")";
+            var label = self.selectedCloudName || "";
+            if (self.selectedGroupName) {
+                label += " (Group : " + self.selectedGroupName +")";
             }
-
             commonLabel.textContent = label;
         }
 
-        if (searchInput) {
-            searchInput.value = "";
-            searchInput.placeholder = "Search Items";
-            searchInput.oninput = null;
+        if (self.lastLoadedTableDRI === cloudDRI && Array.isArray(self.tableItems)) {
+            console.log("Using cached Push Queue table:",cloudDRI);
+            box.style.display = "block";
+            self.renderTable(self.tableItems);
+            self.setupTableSearch();
+            return;
         }
 
-        if (addItemsRightBtn) {
-            addItemsRightBtn.style.display = "flex";
-            addItemsRightBtn.onclick = function () {
-                if (contextPopup) {
-                    contextPopup.style.display = "flex";
-                }
-            };
-        }
+        if (self.tableCache && self.tableCache.has(cloudDRI)) {
+            console.log("Using table cache:",cloudDRI);
+            self.tableItems = self.tableCache.get(cloudDRI);
+            self.lastLoadedTableDRI = cloudDRI;
+            box.style.display = "block";
 
-       if (tableContainer) {
-            tableContainer.innerHTML = "";
-            utils.showContextLoader();
+            self.renderTable(self.tableItems);
+            self.setupTableSearch();
+            return;
         }
-        this.cloudDRI = cloudDRI;
+        tableContainer.innerHTML = "";
+        utils.showContextLoader();
 
         try {
+            console.log("Loading Push Queue table from API:",cloudDRI);
             var data = await utils.getItems(cloudDRI,"Name||Created By||Created On",true,1,9999);
-            var items = data && data.Results ? data.Results : [];
-            this.tableItems = items;
-            this.renderTable(items);
-            this.setupTableSearch();
+            var items = data && data.Results? data.Results : [];
+            self.tableItems = items;
+            self.lastLoadedTableDRI = cloudDRI;
 
-            // Show Last Push Info only if queue has linked items
-            if (info) {
-                info.style.display = items.length > 0 ? "block" : "none";
+            if (!self.tableCache) {
+                self.tableCache = new Map();
             }
-        }
-        catch (e) {
-            console.error("Push Queue Items Load Error:", e);
+            self.tableCache.set(cloudDRI,items);
+            // Box visible
+            box.style.display = "block";
+            self.renderTable(items);
+            self.setupTableSearch();
 
-            this.tableItems = [];
-            this.renderTable([]);
-
-            if (info) {
-                info.style.display = "none";
-            }
-        }
-        finally {
+        } catch (err) {
+            console.error("Push Queue table load error:",err);
+            self.tableItems = [];
+            self.renderTable([]);
+        } finally {
             utils.hideContextLoader();
-        }
-
-        // Load Last Push Info
-        try {
-            var pushInfo = await useFetch(cloudDRI + "/GetFieldValues.json?Fields=Last Pushed To||Last Pushed On").then(function (r) {
-                return r.json();
-            });
-            var pushedTo = (pushInfo["Last Pushed To"] || "").trim();
-            var pushedOn = (pushInfo["Last Pushed On"] || "").trim();
-            // Show info only if at least one value exists
-            if (info) {
-                info.style.display = (pushedTo || pushedOn) ? "block" : "none";
-            }
-            if (lastPushedBy) {
-                lastPushedBy.textContent = pushedTo;
-            }
-            if (lastPushedOn) {
-                lastPushedOn.textContent = pushedOn;
-            }
-        }
-        catch (err) {
-            console.error("Error loading push info:", err);
-            if (info) {
-                info.style.display = "none";
-            }
-
-            if (lastPushedBy) {
-                lastPushedBy.textContent = "";
-            }
-
-            if (lastPushedOn) {
-                lastPushedOn.textContent = "";
-            }
-        }
-
-        // Push Buttons (Always Visible)
-        if (pushToQABtn) {
-            pushToQABtn.onclick = function () {
-                self.pushQueueAction("QA", cloudDRI, false);
-            };
-        }
-
-        if (pushToPreBtn) {
-            pushToPreBtn.onclick = function () {
-                self.pushQueueAction("Prerelease", cloudDRI, false);
-            };
-        }
-
-        if (pushToLiveBtn) {
-            pushToLiveBtn.onclick = function () {
-                self.pushQueueAction("Live", cloudDRI, false);
-            };
         }
     },
     resetCommonContextBox: function () {
@@ -418,8 +437,6 @@
             addItemsRightBtn.onclick = null;
         }
     },
-
-
     renderTable: function (items) {
         var self = this;
         var container = document.getElementById("commonTableContainer");
@@ -453,9 +470,6 @@
             emptyText: "No Items Found",
             onRowClick: function (item, row) {
                 var contextId = item["Object Id"] ||item.ObjectId ||(item.Object && item.Object.Id) ||item.Id;
-                console.log("Selected Item:", item);
-                console.log("Context Id:", contextId);
-
                 container.querySelectorAll("tbody tr").forEach(function (x) {
                     x.classList.remove("selected");
                 });
@@ -549,14 +563,12 @@
             saveEditBtn.onclick = function () {
                 var newName = editName.value.trim();
                 var newDesc = editItemDesc.value.trim();
-
                 this.lastActiveCloud = targetDri;
                 this.editItem(targetDri, newName, newDesc);
-
                 editPopup.style.display = "none";
             }.bind(this);
         }
-        }.bind(this));
+      }.bind(this));
     },
     pushQueueAction: function (mode, selectedItem, isLeft) {
         utils.showLoader();
@@ -582,18 +594,15 @@
         } else {
             url = domain + "/ActionPush.do?Mode=" + encodeURIComponent(mode) + "&ContextId=" + encodeURIComponent(selectedItem);
         }
-        console.log("Push URL:", url);
         useFetch(url)
         .then(function (res) {
             return res.json();
         })
         .then(async function (data) {
-            console.log("ActionPush Response:", data);
             try {
                 var pushInfo = await useFetch(pushQueuesPlugin.cloudDRI +"/GetFieldValues.json?Fields=Last Pushed To||Last Pushed On").then(function (r) {
                     return r.json();
                 });
-                console.log("Latest Push Info:", pushInfo);
             } catch (e) {
                 console.error("GetFieldValues Error:", e);
             }
@@ -607,76 +616,67 @@
         });
     },
     multipleLinkUrl: function () {
-      var contextIds = document.getElementById("contextIdsInput").value.trim();
-      if (!contextIds) return;
-      var cloudDRI = pushQueuesPlugin.cloudDRI;
-      if (!cloudDRI) return;
-      utils.showLoader();
-      var linkUrl = cloudDRI + "/LinkMultiple.do?ItemIds=" + encodeURIComponent(contextIds);
-      useFetch(linkUrl)
-      .then((res) => res.json())
-      .then(() => {
+        var contextIds = document.getElementById("contextIdsInput").value.trim();
+        if (!contextIds) return;
+        var cloudDRI = pushQueuesPlugin.cloudDRI;
+        if (!cloudDRI) return;
+        utils.showLoader();
+        var linkUrl = cloudDRI + "/LinkMultiple.do?ItemIds=" + encodeURIComponent(contextIds);
+        useFetch(linkUrl)
+        .then((res) => res.json())
+        .then(() => {
         pushQueuesPlugin.loadTable(cloudDRI, true);
-      })
-      .catch((err) => console.error("Error linking Context IDs:", err))
-      .finally(() => {
-        utils.hideLoader();
-        document.getElementById("contextPopup").style.display = "none";
-        document.getElementById("contextIdsInput").value = "";
-      });
+        })
+        .catch((err) => console.error("Error linking Context IDs:", err))
+        .finally(() => {
+            utils.hideLoader();
+            document.getElementById("contextPopup").style.display = "none";
+            document.getElementById("contextIdsInput").value = "";
+        });
     },
     setupCloudSearch: function () {
         var self = this;
         var searchInput = document.getElementById("cloudSearchInput");
         var clearBtn = document.getElementById("cloudSearchClear");
-
         if (!searchInput) {
             return;
         }
-
         function applyFilters() {
-
             var query = searchInput.value.trim().toLowerCase();
             var filtered = self.pushQueueClouds || [];
-
-            // Group Filter
+            // GROUP FILTER
             if (self.selectedGroup && self.selectedGroup !== "All") {
                 filtered = filtered.filter(function (item) {
                     return (item["Push Queue Group"] || "") === self.selectedGroup;
                 });
             }
 
-            // Search Filter
+            // SEARCH FILTER
             if (query) {
                 filtered = filtered.filter(function (item) {
-
                     var name = item.Name || "";
                     var description = item.Description || "";
 
                     try {
-                        name = decodeURIComponent(name);
+                        name =  decodeURIComponent(name);
                     } catch (e) {}
 
                     try {
                         description = decodeURIComponent(description);
                     } catch (e) {}
 
-                    return (
-                        name.toLowerCase().includes(query) ||
-                        description.toLowerCase().includes(query)
-                    );
+                    name = name.toLowerCase();
+                    description = description.toLowerCase();
+                    return (name.includes(query) || description.includes(query));
                 });
             }
-
-            self.drawCloudList(filtered);
-
+            self.drawCloudList(filtered,true);
             if (clearBtn) {
-                clearBtn.style.display = query ? "inline" : "none";
+                clearBtn.style.display = query? "inline" : "none";
             }
         }
 
         searchInput.oninput = applyFilters;
-
         if (clearBtn) {
             clearBtn.onclick = function () {
                 searchInput.value = "";
@@ -685,8 +685,6 @@
                 searchInput.focus();
             };
         }
-
-        // Initial Load
         applyFilters();
     },
     setupTableSearch: function () {
@@ -696,9 +694,7 @@
         if (!input) {
             return;
         }
-
         input.value = "";
-
         input.onclick = function (e) {
             e.stopPropagation();
         };
@@ -725,7 +721,6 @@
         };
     },
     removeItem: function (cloudDRI, itemId, source) {
-        console.log("Removing", cloudDRI, itemId);
         var self = this;
         utils.removeItems(cloudDRI, itemId, true, function () {
             self.loadMainCloud(true);
@@ -745,23 +740,17 @@
     },
     loadLastPushInfo: function (cloudDRI) {
         if (!cloudDRI) return;
-
         var lastPushedBy = document.getElementById("lastPushedBy");
         var lastPushedOn = document.getElementById("lastPushedOn");
         var url = cloudDRI + "/GetFieldValues.json?Fields=Last Pushed By||Last Pushed On";
-
         useFetch(url)
         .then(res => res.json())
         .then(data => {
-            console.log("Last Push Info:", data);
-
             if (lastPushedBy) {
                 lastPushedBy.textContent = data["Last Pushed By"] || "-";
             }
-
             if (lastPushedOn) {
                 var pushedOn = data["Last Pushed On"];
-
                 if (pushedOn) {
                     pushedOn = new Date(pushedOn).toLocaleString("en-IN", {
                         day: "2-digit",
@@ -772,11 +761,9 @@
                         hour12: true
                     });
                 }
-
                 lastPushedOn.textContent = pushedOn || "-";
             }
-        })
-        .catch(err => {
+        }).catch(err => {
             console.error("Last Push Info Error:", err);
         });
     },
@@ -792,107 +779,78 @@
         });
         self.drawCloudList(filtered);
     },
-initializeGroupDropdown: function () {
-    var self = this;
+    initializeGroupDropdown: function () {
+        var self = this;
+        var input = document.getElementById("groupInput");
+        var dropdown = document.getElementById("groupDropdown");
+        var selectedText = input.querySelector(".selected-text");
+        var search = document.getElementById("groupSearch");
+        var options = document.getElementById("groupOptions");
+        var noResult = document.getElementById("groupNoResult");
 
-    var input = document.getElementById("groupInput");
-    var dropdown = document.getElementById("groupDropdown");
-    var selectedText = input.querySelector(".selected-text");
-    var search = document.getElementById("groupSearch");
-    var options = document.getElementById("groupOptions");
-    var noResult = document.getElementById("groupNoResult");
-
-    if (!input || !dropdown || !selectedText || !search || !options || !noResult) {
-        return;
-    }
-
-    // Build unique groups
-    var groups = [];
-    var groupMap = {};
-
-    groupMap["all"] = "All";
-
-    (self.pushQueueClouds || []).forEach(function (item) {
-
-        var group = (item["Push Queue Group"] || "").trim();
-
-        if (!group) {
+        if (!input || !dropdown || !selectedText || !search || !options || !noResult) {
             return;
         }
 
-        var key = group.toLowerCase();
-
-        if (!groupMap[key]) {
-            groupMap[key] = group.charAt(0).toUpperCase() + group.slice(1).toLowerCase();
-        }
-    });
-
-    groups = Object.values(groupMap);
-
-    function render(list) {
-
-        options.innerHTML = "";
-
-        if (!list.length) {
-            noResult.style.display = "block";
-            return;
-        }
-
-        noResult.style.display = "none";
-
-        list.forEach(function (groupName) {
-
-            var div = document.createElement("div");
-            div.className = "dropdown-option";
-            div.textContent = groupName;
-
-            div.onclick = function (e) {
-                e.stopPropagation();
-
-                self.selectedGroup = groupName;
-                selectedText.textContent = groupName;
-
-                dropdown.style.display = "none";
-
-                self.setupCloudSearch();
-            };
-
-            options.appendChild(div);
+        // Build unique groups
+        var groups = [];
+        var groupMap = {};
+        groupMap["all"] = "All";
+        (self.pushQueueClouds || []).forEach(function (item) {
+            var group = (item["Push Queue Group"] || "").trim()
+            if (!group) {
+                return;
+            }
+            var key = group.toLowerCase();
+            if (!groupMap[key]) {
+                groupMap[key] = group.charAt(0).toUpperCase() + group.slice(1).toLowerCase();
+            }
         });
-    }
+        groups = Object.values(groupMap);
+        function render(list) {
+            options.innerHTML = "";
+            if (!list.length) {
+                noResult.style.display = "block";
+                return;
+            }
+            noResult.style.display = "none";
+            list.forEach(function (groupName) {
+                var div = document.createElement("div");
+                div.className = "dropdown-option";
+                div.textContent = groupName;
+                div.onclick = function (e) {
+                    e.stopPropagation();
+                    self.selectedGroup = groupName;
+                    selectedText.textContent = groupName;
+                    dropdown.style.display = "none";
 
-    render(groups);
-
-    search.value = "";
-
-    search.oninput = function () {
-
-        var value = this.value.trim().toLowerCase();
-
-        render(
-            groups.filter(function (g) {
+                    self.setupCloudSearch();
+                };
+                options.appendChild(div);
+            });
+        }
+        render(groups);
+        search.value = "";
+        search.oninput = function () {
+            var value = this.value.trim().toLowerCase();
+            render(groups.filter(function (g) {
                 return g.toLowerCase().includes(value);
             })
-        );
-    };
+            );
+        };
+        input.onclick = function (e) {
+            e.stopPropagation();
+            search.value = "";
+            render(groups);
+            dropdown.style.display = dropdown.style.display === "block" ? "none" : "block";
+        };
 
-    input.onclick = function (e) {
-        e.stopPropagation();
-
-        search.value = "";
-        render(groups);
-
-        dropdown.style.display =
-            dropdown.style.display === "block" ? "none" : "block";
-    };
-
-    dropdown.onclick = function (e) {
-        e.stopPropagation();
-    };
-
-    document.onclick = function () {
-        dropdown.style.display = "none";
-    };
-},
+        dropdown.onclick = function (e) {
+            e.stopPropagation();
+        };
+        document.onclick = function () {
+            dropdown.style.display = "none";
+        };
+    },
   };
-//   window.pushQueuesPlugin = new pushQueuesContent();
+//  window.pushQueuesPlugin = new pushQueuesContent();

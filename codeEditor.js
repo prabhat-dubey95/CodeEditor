@@ -3,10 +3,14 @@ var codeEditor = function () {
   this.projectFiles = [];
   this.init();
 };
-
 codeEditor.prototype = {
   topLevelCategory: 944825057,
   topLevelCloudType: 944823551,
+
+    liveWebsiteFilesLoaded: false,
+  liveWebsiteFilesLoading: false,
+  liveWebsiteFilesCache: new Map(),
+
   init: async function () {
     var savedUserData = localStorage.getItem("userData");
     if (savedUserData) {
@@ -21,7 +25,7 @@ codeEditor.prototype = {
     }
     document.body.classList.add("app-ready");
     //document.getElementById("contextControls").style.display = "block";
-      var commonContextBox = document.getElementById("commonContextBox");
+    var commonContextBox = document.getElementById("commonContextBox");
 
     if (commonContextBox) {
       commonContextBox.style.display = "none";
@@ -48,7 +52,6 @@ codeEditor.prototype = {
 
     await this.loadVersions();
     this.restoreLiveWebsiteSelection();
-
     this.allContexts = [];
     this.currentContextId = null;
     this.monacoEditor = null;
@@ -56,7 +59,6 @@ codeEditor.prototype = {
     this.activeLeftPanelTab = "liveActions";
 
     // IMPORTANT: load saved project FIRST
-   // await this.loadProjectState();
     this.pendingCloseTabId = null;
     this.initializeSaveModal();
     this.initializePushQueuesPanel();
@@ -70,11 +72,9 @@ codeEditor.prototype = {
       refreshContextsBtn.onclick = async (e) => {
         e.preventDefault();
         e.stopPropagation();
-
         await this.refreshCommonSection();
       };
     }
-
     document.getElementById("modeDropdown").addEventListener("change", async (e) => {
       this.nodeCache = {
         OT: {},
@@ -92,26 +92,25 @@ codeEditor.prototype = {
       var commonContextBox = document.getElementById("commonContextBox");
       switch (this.activeTabType) {
         case "pushQueues":
-            this.openPushQueuesTab(true);
-            break;
+          this.openPushQueuesTab(true);
+          break;
 
         case "liveWebsite":
-            this.openLiveWebsiteTab(true);
-            break;
+          this.openLiveWebsiteTab(true);
+          break;
 
         case "projects":
-            if (this.selectedProjectFolderData) {
-                this.showProjectFolderFiles(this.selectedProjectFolderData, true);
-            }
-            break;
+          if (this.selectedProjectFolderData) {
+            this.showProjectFolderFiles(this.selectedProjectFolderData, true);
+          }
+          break;
 
         default:
-            await this.refreshCommonSection();
-
-            if (commonContextBox) {
-                commonContextBox.style.display = "block";
-            }
-            break;
+          await this.refreshCommonSection();
+          if (commonContextBox) {
+            commonContextBox.style.display = "block";
+          }
+          break;
         }
     });
 
@@ -244,18 +243,17 @@ codeEditor.prototype = {
       }
     });
     require(["vs/editor/editor.main"], () => {
-      this.monacoEditor = monaco.editor.create(
-        document.getElementById("monacoEditor"),
-        {
-          value: "",
-          language: "html",
-          theme: "vs-dark",
-          automaticLayout: true,
-          minimap: {
-            enabled: false
-          }
+      this.monacoEditor = monaco.editor.create(document.getElementById("monacoEditor"),{
+        value: "",
+        language: "html",
+        theme: "vs-dark",
+        automaticLayout: true,
+        // Enable Ctrl + Mouse Wheel Zoom
+        mouseWheelZoom: true,
+        minimap: {
+          enabled: false
         }
-      );
+      });
       // Default tab
       this.createUntitledTab();
     });
@@ -264,97 +262,112 @@ codeEditor.prototype = {
     var buttons = document.querySelectorAll(".left-panel-tab-button");
     var panels = document.querySelectorAll(".left-panel-tab-panel");
 
-    if (!buttons.length || !panels.length) return;
-
-    this.activeLeftPanelTab = "liveActions";
-
+    if (!buttons.length || !panels.length) {
+      return;
+    }
     var addItemsRightBtn = document.getElementById("addItemsRightBtn");
 
+    var panelMap = {
+      liveActions: "leftPanelLiveActions",
+      projects: "leftPanelProjects",
+      liveWebsite: "leftPanelLiveWebsite",
+      pushQueues: "leftPanelPushQueues"
+    };
+    this.activeLeftPanelTab = "liveActions";
+
     if (addItemsRightBtn) {
-        addItemsRightBtn.style.display = "none";
+      addItemsRightBtn.style.display = "none";
+      addItemsRightBtn.onclick = null;
     }
     buttons.forEach((button) => {
       button.addEventListener("click", async () => {
         var targetPanel = button.getAttribute("data-panel");
+        var targetPanelId = panelMap[targetPanel];
+
+        if (!targetPanelId) {
+          return;
+        }
+        
         if (this.activeLeftPanelTab === targetPanel) {
           return;
         }
         this.activeLeftPanelTab = targetPanel;
         this.resetCommonContextBox();
+
         var pushQueueSection = document.getElementById("pushQueueSection");
-
-        if (pushQueueSection && targetPanel !== "pushQueues") {
-          pushQueueSection.style.display = "none";
+        if (pushQueueSection) {
+          pushQueueSection.style.display = targetPanel === "pushQueues" ? "block": "none";
         }
-
         if (addItemsRightBtn) {
-          addItemsRightBtn.style.display = targetPanel === "pushQueues" ? "flex" : "none";
-
-          if (targetPanel !== "pushQueues") {
+          if (targetPanel === "pushQueues") {
+            addItemsRightBtn.style.display = "flex";
+          } else {
+            addItemsRightBtn.style.display = "none";
             addItemsRightBtn.onclick = null;
           }
         }
-
         buttons.forEach((btn) => {
           btn.classList.toggle("active", btn === button);
         });
-
         panels.forEach((panel) => {
-          var panelId = panel.id;
-          var isActive = targetPanel === "liveActions" ? panelId === "leftPanelLiveActions" : targetPanel === "projects" ? panelId === "leftPanelProjects" : targetPanel === "liveWebsite" ? panelId === "leftPanelLiveWebsite" : panelId === "leftPanelPushQueues";
-          panel.classList.toggle("active", isActive);
+          panel.classList.toggle("active",panel.id === targetPanelId);
         });
-
         if (targetPanel === "liveActions") {
+
           if (this.lastContextSource) {
             var source = this.lastContextSource;
-            var cacheKey = (this.selectedEnterprise?.Id || "default") +"_" + this.mode +"_" + source.action +"_" + source.id;
+            var cacheKey = (this.selectedEnterprise?.Id || "default") + "_" + this.mode + "_" + source.action +"_" + source.id;
             var list = this.contextCache?.[source.action]?.[cacheKey] ||this.contextCache?.[source.action]?.[source.id] ||[];
-
             if (list.length) {
               this.renderContextsFromCache(list);
             }
+          }
+
+          if (this.monacoEditor) {
+            this.monacoEditor.layout();
           }
           return;
         }
 
         if (targetPanel === "pushQueues") {
-          this.openPushQueuesTab();
+          this.openPushQueuesTab(true);
+          if (this.monacoEditor) {
+            this.monacoEditor.layout();
+          }
           return;
         }
         if (targetPanel === "projects") {
           var projectHeader = document.querySelector(".project-header");
           if (projectHeader && projectHeader.classList.contains("tree-selected")) {
-              var rootFolder = {
-                name: "Projects",
-                path: this.projectRoot,
-                children: this.projectTreeItems || []
-              };
-              this.selectedProjectFolder = rootFolder.path;
-              this.selectedProjectFolderData = rootFolder;
-              this.showProjectFolderFiles(rootFolder, true);
+            var rootFolder = {
+              name: "Projects",
+              path: this.projectRoot,
+              children: this.projectTreeItems || []
+            };
 
+            this.selectedProjectFolder = rootFolder.path;
+            this.selectedProjectFolderData = rootFolder;
+            this.showProjectFolderFiles(rootFolder,true);
           } else {
-              var projectsLabel = document.getElementById("projectsLabel");
-              if (projectsLabel) {
-                projectsLabel.click();
-              }
+            var projectsLabel = document.getElementById("projectsLabel");
+            if (projectsLabel) {
+              projectsLabel.click();
+            }
+          }
+
+          if (this.monacoEditor) {
+            this.monacoEditor.layout();
           }
           return;
         }
-
-        // if (targetPanel === "liveWebsite") {
-        //   var panel = document.getElementById("liveWebsitePanel");
-
-        //   if (panel) {
-        //       panel.style.display = "block";
-        //   }
-        // }
         if (targetPanel === "liveWebsite") {
-          await this.openLiveWebsiteTab();
+          await this.openLiveWebsiteTab(false);
+
+          if (this.monacoEditor) {
+            this.monacoEditor.layout();
+          }
           return;
         }
-
         if (this.monacoEditor) {
           this.monacoEditor.layout();
         }
@@ -370,10 +383,11 @@ codeEditor.prototype = {
     var container = document.getElementById("commonTableContainer");
     var addItemsRightBtn = document.getElementById("addItemsRightBtn");
 
-    if (!box) return;
+    if (!box) {
+      return;
+    }
 
     box.style.display = "none";
-
     if (label) {
       label.textContent = "";
     }
@@ -597,7 +611,7 @@ codeEditor.prototype = {
     aiBtn.className = "ai-tab";
     aiBtn.innerHTML = `
         <svg class="icon -large -fill">
-            <use href="#AI"></use>
+          <use href="#AI"></use>
         </svg>
     `;
 
@@ -607,8 +621,6 @@ codeEditor.prototype = {
     container.appendChild(aiBtn);
   },
   switchContext: function (id) {
-    console.log("Switching:", id);
-    console.log("Tabs:", this.allContexts);
     this.activeTabType = "editor";
     var container = document.getElementById("pushQueuesContainer");
     var liveWebsiteContainer = document.getElementById("liveWebsiteContainer");
@@ -636,14 +648,6 @@ codeEditor.prototype = {
     if (!tab) return;
 
     this.currentContextId = id;
-
-    // this.monacoEditor.setModel(tab.model);
-    // this.renderTabs();
-    // this.renderProjectFiles();
-    // this.renderAiMessages(tab);
-    // this.monacoEditor.layout();
-    // this.monacoEditor.focus();
-
     if (tab.model) {
       this.monacoEditor.setModel(tab.model);
       this.monacoEditor.layout();
@@ -744,19 +748,7 @@ codeEditor.prototype = {
             input.querySelector(".selected-text").textContent = option.textContent;
             dropdown.style.display = "none";
             search.value = "";
-
-            // CLEAR CACHE
-            this.nodeCache = {
-              OT: {},
-              Category: {},
-              CloudType: {}
-            };
-
-            this.contextCache = {
-              ObjectType: {},
-              Category: {},
-              CloudType: {}
-            };
+            this.clearCaches();
 
             document.querySelector(".-context-input-box").style.display = "flex";
             var wrapper = document.getElementById("contextsWrapper");
@@ -779,19 +771,16 @@ codeEditor.prototype = {
       this.selectedEnterprise = defaultEnterprise;
       input.querySelector(".selected-text").textContent = defaultEnterprise["Formatted Name"] || defaultEnterprise.FormattedName || defaultEnterprise.Name;
       renderOptions();
-input.onclick = (e) => {
-    e.stopPropagation();
-
-    // Close Brand dropdown
-    var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
-    if (brandDropdown) {
-        brandDropdown.style.display = "none";
-    }
-
-    // Toggle Enterprise dropdown
-    dropdown.style.display =
-        dropdown.style.display === "block" ? "none" : "block";
-};
+      input.onclick = (e) => {
+        e.stopPropagation();
+        // Close Brand dropdown
+        var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
+        if (brandDropdown) {
+          brandDropdown.style.display = "none";
+        }
+        // Toggle Enterprise dropdown
+        dropdown.style.display = dropdown.style.display === "block" ? "none" : "block";
+      };
 
       search.oninput = () => {
         renderOptions(search.value);
@@ -840,11 +829,6 @@ input.onclick = (e) => {
           this.setSelectedNode(div);
           await this.loadChildNodes(div, item.HierarchyPosition);
         });
-        // div.querySelector(".label").addEventListener("click", async (e) => {
-        //   e.stopPropagation();
-        //   console.log("Object Clicked ID:", item.Id);
-        //   await this.loadContexts(item.Id);
-        // });
         div.querySelector(".label").setAttribute("data-context-id", item.Id);
 
         div.querySelector(".label").addEventListener("click", async (e) => {
@@ -865,7 +849,7 @@ input.onclick = (e) => {
   getAndLoadTopLevelCategoryAndCloudType: async function () {
     try {
       var enterpriseId = this.selectedEnterprise.Id;
-      var domain = this.getSelectedEnterpriseDoamin();
+      var domain = this.getSelectedEnterpriseDomain();
       var url = "http://" + domain + "/GetTopLevelCategories.json?EnterpriseId=" + enterpriseId;
       var response = await fetch(url);
       var data = await response.json();
@@ -1036,7 +1020,9 @@ input.onclick = (e) => {
 
       var response = await fetch(url);
       var data = await response.json();
-      var list = data.Results || data || [];
+      //var list = data.Results || data || [];
+
+      var list = this.getApiResults(data);
 
       // Remove duplicates
       var seen = new Set();
@@ -1061,10 +1047,6 @@ input.onclick = (e) => {
           <span class="label">${child["Formatted Name"]}</span>
         `;
         div.dataset.open = "false";
-        // div.addEventListener("click", async (e) => {
-        //   e.stopPropagation();
-        //   await this.loadChildNodes(div, child.HierarchyPosition);
-        // });
         div.querySelector(".toggle").addEventListener("click", async (e) => {
           e.stopPropagation();
           await this.loadChildNodes(div, child.HierarchyPosition);
@@ -1090,29 +1072,6 @@ input.onclick = (e) => {
       this.setToggleState(parentDiv, false);
     }
   },
-  renderNodes: function (list, parent) {
-    var tree = document.getElementById("hierarchyTree");
-    list.forEach(item => {
-      var div = document.createElement("div");
-      div.style.marginLeft = "20px";
-      //safer UI structure
-      div.innerHTML = `
-        <span class="toggle">[+] </span>
-        <span class="label">${item["Formatted Name"] || item.DisplayName}</span>
-      `;
-      //IMPORTANT
-      div.dataset.hpos = item.HierarchyPosition;
-      div.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        var hpos = e.currentTarget.dataset.hpos;
-        if (!hpos) {
-          return;
-        }
-        await this.loadChildNodes(div, hpos);
-      });
-      tree.appendChild(div);
-    });
-  },
   loadChildNodes: async function (parentDiv, hpos) {
     try {
       // Close node
@@ -1123,10 +1082,6 @@ input.onclick = (e) => {
         this.setToggleState(parentDiv, false);
         return;
       }
-      // if (this.nodeCache.OT[hpos]) {
-      //   this.renderChildNodesFromCache(parentDiv, this.nodeCache.OT[hpos]);
-      //   return;
-      // }
 
       // Show mini loader
       this.showMiniLoader(parentDiv);
@@ -1139,7 +1094,8 @@ input.onclick = (e) => {
       var response = await fetch(url);
       var data = await response.json();
 
-      var list = data.Results || data || [];
+      //var list = data.Results || data || [];
+      var list = this.getApiResults(data);
       this.nodeCache.OT[hpos] = list;
 
       if (!list.length) {
@@ -1194,6 +1150,21 @@ input.onclick = (e) => {
       this.setToggleState(parentDiv, false);
     }
   },
+  getApiResults: function (data) {
+    if (!data) {
+        return [];
+    }
+
+    if (Array.isArray(data.Results)) {
+        return data.Results;
+    }
+
+    if (Array.isArray(data)) {
+        return data;
+    }
+
+    return [];
+  },
   getCurrentDomain: function () {
     var domain = "";
     switch ((this.mode || "").toLowerCase()) {
@@ -1237,18 +1208,17 @@ input.onclick = (e) => {
         this.renderContextsFromCache(this.contextCache[type][cacheKey]);
         return;
       }
-      utils.showContextLoader();
       document.querySelector(".-context-input-box").style.display = "flex";
       var wrapper = document.getElementById("contextsWrapper");
       if (wrapper) {
         wrapper.style.display = "block";
       }
       this.showContextsLoading();
-      var domain = this.getSelectedEnterpriseDoamin();
+      var domain = this.getSelectedEnterpriseDomain();
       var url = "http://" + domain + "/GetContexts.json?Type=" + type +"&Fields=Last%20Edited%20On||Last%20Edited%20By" +"&ResultCount=3000" +"&ObjectType=" + objectId;
       var response = await fetch(url);
       var data = await response.json();
-      var list = data.Results || [];
+      var list = this.getApiResults(data);
 
       this.contextCache[type][objectId] = list;
       this.contextCache[type][cacheKey] = list;
@@ -1262,11 +1232,10 @@ input.onclick = (e) => {
 
       if (cacheKey) {
         delete this.contextLoading[cacheKey];
-        utils.hideContextLoader();
       }
     }
   },
-  getSelectedEnterpriseDoamin: function () {  
+  getSelectedEnterpriseDomain: function () {  
     var enterprise = this.selectedEnterprise;
     var mode = (this.mode || "").toLowerCase();
     if (!enterprise || !enterprise.Versions) {
@@ -1279,12 +1248,6 @@ input.onclick = (e) => {
       return match.Domain;
     }
     return null;
-  },
-  resetLeftPanel: function () {
-    var _oT = document.getElementById("OT");
-    var _cat = document.getElementById("Cat");
-    _oT.innerHTML = "";
-  _cat.innerHTML = "";
   },
   rebuildLeftPanel: async function () {
     try {
@@ -1315,13 +1278,6 @@ input.onclick = (e) => {
       console.error("Rebuild error:", err);
     }
   },
-  // searchContexts: function (text) {
-  //   text = text.toLowerCase();
-  //   var filtered = this.allContexts.filter(ctx => {
-  //     return JSON.stringify(ctx).toLowerCase().includes(text);
-  //   });
-  //   this.renderContexts(filtered);
-  // },
   loadCategoryContexts: async function (objectId) {
     this.toggleContexts(true);
     var type = "Category";
@@ -1356,12 +1312,12 @@ input.onclick = (e) => {
       }
 
       this.showContextsLoading();
-      var domain = this.getSelectedEnterpriseDoamin();
+      var domain = this.getSelectedEnterpriseDomain();
       var url = "http://" + domain +"/GetContexts.json?Type=OnCategory" +"&Fields=Last%20Edited%20On||Last%20Edited%20By" +"&ResultCount=3000" +"&ObjectType=" +objectId;
 
       var response = await fetch(url);
       var data = await response.json();
-      var list = data.Results || [];
+      var list = this.getApiResults(data);
 
       this.contextCache[type][objectId] = list;
       this.contextCache[type][cacheKey] = list;
@@ -1397,7 +1353,7 @@ input.onclick = (e) => {
       // tbody.innerHTML = "<tr><td colspan='3'>Loading...</td></tr>";
       this.showContextsLoading();
 
-      var domain = this.getSelectedEnterpriseDoamin();
+      var domain = this.getSelectedEnterpriseDomain();
       var url ="http://" + domain + "/GetContexts.json?Type=OnCategory" +"&Fields=Last%20Edited%20On||Last%20Edited%20By" +"&ResultCount=3000" +"&ObjectType=" + objectId;
       var response = await fetch(url);
       var data = await response.json();
@@ -1523,31 +1479,24 @@ input.onclick = (e) => {
   },
   loadProjects: async function () {
     try {
-        var result = await window.electronAPI.getProjects();
+      var result = await window.electronAPI.getProjects();
+      if (!result || !result.success) {
+        return;
+      }
 
-        if (!result || !result.success) {
-            return;
+      this.projectRoot = result.root;
+      this.projectTreeItems = result.items || [];
+
+      this.renderProjectTree(this.projectTreeItems);
+      if (this.selectedProjectFolderData) {
+        var folder = this.findProjectFolderByPath(this.projectTreeItems,this.selectedProjectFolder);
+        if (folder) {
+          this.selectedProjectFolderData = folder;
         }
-
-        this.projectRoot = result.root;
-        this.projectTreeItems = result.items || [];
-
-        this.renderProjectTree(this.projectTreeItems);
-        if (this.selectedProjectFolderData) {
-
-            var folder = this.findProjectFolderByPath(
-                this.projectTreeItems,
-                this.selectedProjectFolder
-            );
-
-
-            if (folder) {
-                this.selectedProjectFolderData = folder;
-            }
-        }
+      }
     }
     catch (error) {
-        console.error("Load projects error:", error);
+      console.error("Load projects error:", error);
     }
   },
   loadSourceCodeInEditor: async function (contextId,tabId) {
@@ -1588,21 +1537,18 @@ input.onclick = (e) => {
       this.monacoEditor.focus();
       //tab.originalContent = tab.model.getValue();
       if (tab.model) {
-          tab.originalContent = tab.model.getValue();
+        tab.originalContent = tab.model.getValue();
       }
     } catch (err) {
       console.error("Source load error:",err);
     }
   },
   openContextInEditor: async function (contextId, contextName) {
-    console.log("openContextInEditor:", contextId, contextName);
     try {
       if (!contextId) {
         console.error("Invalid contextId");
         return;
       }
-     //utils.showSnackbar("Opening Context");
-
       // Already open?
       var existingTab = this.allContexts.find(t => t.contextId == contextId);
 
@@ -1641,18 +1587,13 @@ input.onclick = (e) => {
       //await this.loadSourceCodeInEditor(contextId);
       await this.loadSourceCodeInEditor(contextId, tabId);
       if (tab.model) {
-        this.currentContextId = tabId;
         this.monacoEditor.setModel(tab.model);
         this.monacoEditor.layout();
         this.monacoEditor.focus();
-        this.renderTabs();
+        tab.originalContent = tab.model.getValue();
       }
 
-      tab.originalContent = tab.model.getValue();
-
       this.renderTabs();
-      tab.originalContent = tab.model.getValue();
-
       utils.showSnackbar("Context opened");
     }
     catch (err) {
@@ -1674,7 +1615,6 @@ input.onclick = (e) => {
       e.preventDefault();
       var contextId = row.dataset.contextId;
       if (!contextId) {
-        console.warn("Context Id not found on row.", row);
         menu.style.display = "none";
         return;
       }
@@ -1952,7 +1892,6 @@ input.onclick = (e) => {
         body: "SourceCode=" + encodeURIComponent(code)
       });
       var text = await response.text();
-      console.log(text);
       var tab = this.allContexts.find(t => t.contextId == contextId);
       if (tab && tab.model) {
         tab.originalContent = tab.model.getValue();
@@ -2001,17 +1940,6 @@ input.onclick = (e) => {
   confirmCloseTab: function (tabId) {
     var tab = this.allContexts.find(t => t.id === tabId);
     if (!tab) return;
-    // var content = "";
-    // if (tab.model) {
-    //   content = tab.model.getValue().trim();
-    // }
-    // if (!content) {
-    //   this.closeTab(tabId);
-    //   return;
-    // }
-    // this.pendingCloseTabId = tabId;
-    // var modal = document.getElementById("saveModal");
-    // modal.style.display = "flex";
     var isDirty = false;
 
     if (tab.model && typeof tab.originalContent === "string") {
@@ -2095,70 +2023,63 @@ input.onclick = (e) => {
       this.scriptDomain = savedUrl;
     }
     button.addEventListener("click", async () => {
-        var domain = urlInput.value.trim();
+      var domain = urlInput.value.trim();
+      if (!domain) {
+        utils.showSnackbar("Unable to login to this script URL, please ensure the URL is valid.","error");
+        return;
+      }
 
-        if (!domain) {
-            utils.showSnackbar(
-                "Unable to login to this script URL, please ensure the URL is valid.",
-                "error"
-            );
-            return;
+      domain = domain.replace(/\/+$/, "");
+      this.scriptDomain = domain;
+      localStorage.setItem("scriptUrl", domain);
+
+      var username = localStorage.getItem("loginUserName");
+      var password = localStorage.getItem("loginPassword");
+
+      if (!username || !password) {
+        utils.showSnackbar("Please login first.");
+        return;
+      }
+
+      try {
+        button.disabled = true;
+        button.textContent = "Processing...";
+
+        var loginResp = await fetch(domain + "/login.do", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: new URLSearchParams({
+            UserName: username,
+            Password: password
+          })
+        });
+        var loginData = await loginResp.json();
+        if (!loginData || loginData.Result === false) {
+          throw new Error("Script login failed.");
         }
 
-        domain = domain.replace(/\/+$/, "");
-        this.scriptDomain = domain;
-        localStorage.setItem("scriptUrl", domain);
-
-        var username = localStorage.getItem("loginUserName");
-        var password = localStorage.getItem("loginPassword");
-
-        if (!username || !password) {
-            utils.showSnackbar("Please login first.");
-            return;
+        if (checkbox && checkbox.checked) {
+          await fetch(domain + "/ExecuteCustomCode.htm?ShowDebug=all", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: "ShowDebug=all"
+          });
         }
-
-        try {
-            button.disabled = true;
-            button.textContent = "Processing...";
-
-            var loginResp = await fetch(domain + "/login.do", {
-                method: "POST",
-                credentials: "include",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: new URLSearchParams({
-                    UserName: username,
-                    Password: password
-                })
-            });
-
-            var loginData = await loginResp.json();
-
-            if (!loginData || loginData.Result === false) {
-                throw new Error("Script login failed.");
-            }
-
-            if (checkbox && checkbox.checked) {
-                await fetch(domain + "/ExecuteCustomCode.htm?ShowDebug=all", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    },
-                    body: "ShowDebug=all"
-                });
-            }
-
-            utils.showSnackbar("Script login successful.");
-        }
-        catch (e) {
-            utils.showSnackbar("Script login failed.", "error");
-        }
-        finally {
-            button.disabled = false;
-            button.textContent = "Login";
-        }
+        utils.showSnackbar("Script login successful.");
+      }
+      catch (e) {
+        utils.showSnackbar("Script login failed.", "error");
+      }
+      finally {
+        button.disabled = false;
+        button.textContent = "Login";
+      }
     });
   },
   runCustomScriptOnF5: async function () {
@@ -2305,59 +2226,82 @@ input.onclick = (e) => {
     });
   },
   extractAiReply: function (payload) {
-    if (!payload) return "";
-    if (typeof payload === "string") return payload;
+    if (payload === null || payload === undefined) {
+      return "";
+    }
+
+    if (typeof payload === "string") {
+      return payload.trim();
+    }
 
     if (Array.isArray(payload)) {
       for (var i = 0; i < payload.length; i++) {
         var nested = this.extractAiReply(payload[i]);
-        if (nested) return nested;
+        if (nested) {
+          return nested;
+        }
       }
       return "";
     }
 
     if (typeof payload === "object") {
-      var keys = ["response", "result", "message", "output", "text", "content", "reply", "answer", "data"];
+      var keys = ["response","result","message","output","text","content","reply","answer","code","data","candidates","parts"];
+      // First check known AI response fields
       for (var key in payload) {
-        if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+
+        if (!Object.prototype.hasOwnProperty.call(payload, key)) {
+          continue;
+        }
+
         var lowerKey = key.toLowerCase();
         if (keys.indexOf(lowerKey) !== -1) {
           var value = this.extractAiReply(payload[key]);
-          if (value) return value;
+          if (value) {
+            return value;
+          }
         }
       }
-      if (payload.Response) return this.extractAiReply(payload.Response);
-      if (payload.Result) return this.extractAiReply(payload.Result);
-      if (payload.Message) return this.extractAiReply(payload.Message);
-      if (payload.Output) return this.extractAiReply(payload.Output);
-      if (payload.Text) return this.extractAiReply(payload.Text);
-      if (payload.Content) return this.extractAiReply(payload.Content);
-      if (payload.Reply) return this.extractAiReply(payload.Reply);
-      if (payload.Answer) return this.extractAiReply(payload.Answer);
+
+      // Fallback: recursively search other properties
+      for (var prop in payload) {
+        if (!Object.prototype.hasOwnProperty.call(payload, prop)) {
+          continue;
+        }
+        var result = this.extractAiReply(payload[prop]);
+        if (result) {
+          return result;
+        }
+      }
     }
     return "";
   },
   sendAiPrompt: async function () {
     var promptInput = document.getElementById("aiPrompt");
     var sendBtn = document.getElementById("sendAiPrompt");
+
     if (!promptInput || !sendBtn) return;
-    var activeTab = this.allContexts.find(t => t.id === this.currentContextId);
+
+    var activeTab = this.allContexts.find(
+      t => t.id === this.currentContextId
+    );
 
     if (!activeTab) {
       utils.showSnackbar("No file is open.", "warning");
       return;
     }
+
     if (!Array.isArray(activeTab.aiMessages)) {
       activeTab.aiMessages = [];
     }
 
     var prompt = promptInput.value.trim();
+
     if (!prompt) {
       utils.showSnackbar("Enter a prompt.", "warning");
       return;
     }
 
-    // User message
+    // Save user message
     this.addAiMessage(prompt, "user");
 
     promptInput.value = "";
@@ -2367,22 +2311,28 @@ input.onclick = (e) => {
     this.addAiMessage("Generating code...", "assistant", true);
 
     var messages = document.getElementById("aiMessages");
-    var loadingNode = messages.lastElementChild;
+    var loadingNode = messages ? messages.lastElementChild : null;
 
     try {
-      var domain = this.getSelectedEnterpriseDoamin();
+      var domain = this.getSelectedEnterpriseDomain();
       var selectedCode = "";
       if (this.monacoEditor && this.monacoEditor.getSelection()) {
-        selectedCode = this.monacoEditor.getModel().getValueInRange(this.monacoEditor.getSelection());
+        var selection = this.monacoEditor.getSelection();
+
+        if (selection) {
+          selectedCode = this.monacoEditor.getModel().getValueInRange(selection);
+        }
       }
 
       var payload = {
         prompt: prompt,
         selectedCode: selectedCode,
-        fileCode: this.monacoEditor ? this.monacoEditor.getValue() : ""
+        fileCode: this.monacoEditor? this.monacoEditor.getValue() : ""
       };
 
-      var response = await fetch("http://" + domain + "/GetAICode.json?RenderItem=" + activeTab.contextId,
+      console.log("AI Request:", payload);
+
+      var response = await fetch("http://" +domain +"/GetAICode.json?RenderItem=" +activeTab.contextId,
         {
           method: "POST",
           headers: {
@@ -2391,53 +2341,43 @@ input.onclick = (e) => {
           },
           body: JSON.stringify(payload)
         });
+      console.log("AI HTTP Status:", response.status);
+      if (!response.ok) {
+        throw new Error("AI API returned HTTP " + response.status);
+      }
       var data = await response.json();
-      // Remove loading node from UI
+
+      console.log("AI API Response:", data);
+
+      // Remove loading UI
       if (loadingNode && loadingNode.parentNode) {
         loadingNode.parentNode.removeChild(loadingNode);
       }
 
-      // Remove loading message from history
+      // Remove loading history
       activeTab.aiMessages = activeTab.aiMessages.filter(function (m) {
         return !(m.isSystem && m.text === "Generating code...");
       });
 
-      if (!data.Success || !data.Code) {
-        this.addAiMessage("No code returned.", "assistant", true);
-        return;
+      var aiCode = "";
+
+      if (data && typeof data.Code === "string" && data.Code.trim()) {
+        aiCode = data.Code.trim();
       }
 
-      // Create AI response UI
-      var wrapper = document.createElement("div");
-      wrapper.className = "ai-message assistant";
+      if (!aiCode) {
+        aiCode = this.extractAiReply(data);
+      }
 
-      var pre = document.createElement("pre");
-      pre.className = "ai-code";
-      pre.textContent = data.Code;
+      if (!aiCode) {
+        console.warn("AI response did not contain code/reply:",data);
+        this.addAiMessage("No code returned from AI.","assistant",true);
+        return;
+      }
+      this.renderAIResult(aiCode, activeTab);
+    } catch (err) {
 
-      var applyBtn = document.createElement("button");
-      applyBtn.className = "apply-ai-btn";
-      applyBtn.textContent = "Apply";
-
-      applyBtn.onclick = () => {
-        this.monacoEditor.setValue(data.Code);
-        utils.showSnackbar("Code applied successfully.");
-      };
-
-      wrapper.appendChild(pre);
-      wrapper.appendChild(applyBtn);
-
-      messages.appendChild(wrapper);
-      messages.scrollTop = messages.scrollHeight;
-
-      // Save response in history
-      activeTab.aiMessages.push({
-        role: "assistant",
-        code: data.Code
-      });
-    }
-    catch (err) {
-      console.error(err);
+      console.error("AI request error:",err);
 
       if (loadingNode && loadingNode.parentNode) {
         loadingNode.parentNode.removeChild(loadingNode);
@@ -2448,10 +2388,10 @@ input.onclick = (e) => {
           return !(m.isSystem && m.text === "Generating code...");
         });
       }
-      this.addAiMessage("AI request failed.", "assistant", true);
-      utils.showSnackbar("AI request failed.", "error");
-    }
-    finally {
+      this.addAiMessage("AI request failed.","assistant",true);
+      utils.showSnackbar("AI request failed.","error");
+
+    } finally {
       sendBtn.disabled = false;
       promptInput.focus();
     }
@@ -2469,28 +2409,31 @@ input.onclick = (e) => {
       document.getElementById("aiPrompt").focus();
     }
   },
-  showAIResult: function(code) {
+  renderAIResult: function (code) {
     var messages = document.getElementById("aiMessages");
+    if (!messages) return;
 
-    var box = document.createElement("div");
-    box.className = "ai-message assistant";
+    var wrapper = document.createElement("div");
+    wrapper.className = "ai-message assistant";
 
     var pre = document.createElement("pre");
+    pre.className = "ai-code";
     pre.textContent = code;
 
-    var btn = document.createElement("button");
-    btn.className = "apply-ai-btn";
-    btn.textContent = "Apply";
+    var applyBtn = document.createElement("button");
+    applyBtn.className = "apply-ai-btn";
+    applyBtn.textContent = "Apply";
 
-    btn.onclick = () => {
+    applyBtn.onclick = () => {
+      if (!this.monacoEditor) return;
+
       this.monacoEditor.setValue(code);
-      utils.showSnackbar("Code applied successfully");
+      utils.showSnackbar("Code applied successfully.");
     };
 
-    box.appendChild(pre);
-    box.appendChild(btn);
-
-    messages.appendChild(box);
+    wrapper.appendChild(pre);
+    wrapper.appendChild(applyBtn);
+    messages.appendChild(wrapper);
     messages.scrollTop = messages.scrollHeight;
   },
   renderAiMessages: function (tab) {
@@ -2506,26 +2449,8 @@ input.onclick = (e) => {
       if (msg.isSystem && msg.text === "Generating code...") {
         return;
       }
-
       if (msg.code) {
-        var wrapper = document.createElement("div");
-        wrapper.className = "ai-message assistant";
-
-        var pre = document.createElement("pre");
-        pre.className = "ai-code";
-        pre.textContent = msg.code;
-
-        var applyBtn = document.createElement("button");
-        applyBtn.className = "apply-ai-btn";
-        applyBtn.textContent = "Apply";
-
-        applyBtn.onclick = () => {
-          this.monacoEditor.setValue(msg.code);
-          utils.showSnackbar("Code applied successfully.");
-        };
-        wrapper.appendChild(pre);
-        wrapper.appendChild(applyBtn);
-        messages.appendChild(wrapper);
+        this.renderAIResult(msg.code, null);
       } else {
         // Don't save again while restoring
         this.addAiMessage(msg.text, msg.role, msg.isSystem, false);
@@ -2534,133 +2459,154 @@ input.onclick = (e) => {
     messages.scrollTop = messages.scrollHeight;
   },
   openPushQueuesTab: function (forceReload = false) {
-
-    if (!forceReload && this.activeTabType === "pushQueues") {
+      if (!forceReload && this.activeTabType === "liveWebsite") {
         return;
+      }
+    if (!forceReload && this.activeTabType === "pushQueues") {
+      return;
     }
-
+     this.activeTabType = "liveWebsite";
     this.activeTabType = "pushQueues";
-
     var container = document.getElementById("pushQueuesContainer");
     var editor = document.getElementById("monacoEditor");
     var liveWebsiteContainer = document.getElementById("liveWebsiteContainer");
-
     var pushQueuesTab = document.getElementById("pushQueuesTab");
     var liveWebsiteTab = document.getElementById("liveWebsite");
 
-    if (!container) return;
-
-    // Show Push Queues
+    if (!container) {
+      return;
+    }
     container.style.display = "flex";
-
     var pushQueueSection = document.getElementById("pushQueueSection");
     if (pushQueueSection) {
-        pushQueueSection.style.display = "block";
+      pushQueueSection.style.display = "block";
     }
-
-    // Hide Monaco Editor
     if (editor) {
-        editor.style.display = "none";
+      editor.style.display = "none";
     }
 
-    // Hide LiveWebsite
     if (liveWebsiteContainer) {
-        liveWebsiteContainer.style.display = "none";
+      liveWebsiteContainer.style.display = "none";
     }
-
     if (pushQueuesTab) {
-        pushQueuesTab.classList.add("active");
+      pushQueuesTab.classList.add("active");
     }
 
     if (liveWebsiteTab) {
-        liveWebsiteTab.classList.remove("active");
+      liveWebsiteTab.classList.remove("active");
     }
-
     var aiBtn = document.getElementById("aiTabButton");
-    if (aiBtn) {
-        aiBtn.disabled = true;
-    }
 
+    if (aiBtn) {
+      aiBtn.disabled = true;
+    }
     if (!window.pushQueuesPlugin) {
-        window.pushQueuesPlugin = new pushQueuesContent();
+      // First time only
+      window.pushQueuesPlugin = new pushQueuesContent();
     } else {
-        window.pushQueuesPlugin.loadMainCloud(true);
+      var pushQueue = window.pushQueuesPlugin;
+      var commonContextBox = document.getElementById("commonContextBox");
+      if (commonContextBox) {
+        commonContextBox.style.display = "block";
+      }
+      if (pushQueue.pushQueueClouds && pushQueue.pushQueueClouds.length) {
+        pushQueue.setupCloudSearch();
+        pushQueue.restoreSelectedQueue();
+
+      } else {
+        pushQueue.loadMainCloud();
+      }
     }
 
     if (this.monacoEditor) {
         this.monacoEditor.layout();
     }
-},
+  },
   openLiveWebsiteTab: async function (forceReload = false) {
+  if (!forceReload && this.activeTabType === "liveWebsite") {
+    return;
+  }
 
-    if (!forceReload && this.activeTabType === "liveWebsite") {
-        return;
-    }
+  this.activeTabType = "liveWebsite";
 
-    this.activeTabType = "liveWebsite";
+  var container = document.getElementById("liveWebsitePanel");
+  var editor = document.getElementById("monacoEditor");
 
-    var container = document.getElementById("liveWebsitePanel");
-    var pushQueuesContainer = document.getElementById("pushQueuesContainer");
-    var editor = document.getElementById("monacoEditor");
-    var pushQueuesTab = document.getElementById("pushQueuesTab");
-    var liveWebsiteTab = document.getElementById("liveWebsite");
+  if (!container || !editor) {
+    return;
+  }
 
-    if (!container || !editor) return;
+  container.style.display = "block";
+  editor.style.display = "none";
 
-    editor.style.display = "none";
-    container.style.display = "block";
+  var pushQueuesContainer = document.getElementById("pushQueuesContainer");
+  if (pushQueuesContainer) {
+    pushQueuesContainer.style.display = "none";
+  }
 
-    if (pushQueuesContainer) {
-        pushQueuesContainer.style.display = "none";
-    }
+  var pushQueueSection = document.getElementById("pushQueueSection");
+  if (pushQueueSection) {
+    pushQueueSection.style.display = "none";
+  }
 
-    var pushQueueSection = document.getElementById("pushQueueSection");
-    if (pushQueueSection) {
-        pushQueueSection.style.display = "none";
-    }
+  var pushQueuesTab = document.getElementById("pushQueuesTab");
+  var liveWebsiteTab = document.getElementById("liveWebsite");
 
-    if (liveWebsiteTab) {
-        liveWebsiteTab.classList.add("active");
-    }
+  if (liveWebsiteTab) {
+    liveWebsiteTab.classList.add("active");
+  }
 
-    if (pushQueuesTab) {
-        pushQueuesTab.classList.remove("active");
-    }
+  if (pushQueuesTab) {
+    pushQueuesTab.classList.remove("active");
+  }
 
-    var aiBtn = document.getElementById("aiTabButton");
-    if (aiBtn) {
-        aiBtn.disabled = true;
-    }
+  var aiBtn = document.getElementById("aiTabButton");
+  if (aiBtn) {
+    aiBtn.disabled = true;
+  }
 
+  // Initialize only once
+  if (!this.liveWebsiteInitialized) {
+    this.liveWebsiteInitialized = true;
     await this.initializeLiveWebsiteTab();
-    if (this.selectedLiveWebsite) {
-      await this.loadLiveWebsiteFiles(this.selectedLiveWebsite);
-    }
+  }
+
+  // Selected website hai to uska context restore/load karo
+  if (this.selectedLiveWebsite) {
+    await this.loadLiveWebsiteFiles(this.selectedLiveWebsite);
+  }
 },
   restoreLiveWebsiteSelection: function () {
     var enterprise = localStorage.getItem("selectedLiveWebsiteEnterprise");
-    if (enterprise) {
-      this.selectedLiveWebsiteEnterprise = JSON.parse(enterprise);
-    }
     var brand = localStorage.getItem("selectedLiveWebsiteBrand");
-    if (brand) {
-      this.selectedBrand = JSON.parse(brand);
-    }
-
     var website = localStorage.getItem("selectedLiveWebsite");
 
-    if (website) {
-      this.selectedLiveWebsite = JSON.parse(website);
+    try {
+      this.selectedLiveWebsiteEnterprise = enterprise? JSON.parse(enterprise) : null;
+    } catch (e) {
+      this.selectedLiveWebsiteEnterprise = null;
+    }
+
+    try {
+      this.selectedBrand = brand? JSON.parse(brand) : null;
+    } catch (e) {
+      this.selectedBrand = null;
+    }
+
+    try {
+      this.selectedLiveWebsite = website? JSON.parse(website): null;
+    } catch (e) {
+      this.selectedLiveWebsite = null;
     }
   },
-initializeLiveWebsiteTab: async function () {
+  initializeLiveWebsiteTab: async function () {
     this.restoreLiveWebsiteSelection();
 
     var input = document.getElementById("liveWebsiteEnterpriseInput");
     var dropdown = document.getElementById("liveWebsiteEnterpriseDropdown");
 
     if (!input || !dropdown) {
-        return;
+      return;
     }
 
     var selectedText = input.querySelector(".selected-text");
@@ -2669,569 +2615,410 @@ initializeLiveWebsiteTab: async function () {
     var noResult = dropdown.querySelector(".no-result");
 
     if (!selectedText || !options) {
-        return;
+      return;
     }
-
-    options.innerHTML = "";
-
     var self = this;
+    function getEnterpriseName(enterprise) {
+      return enterprise? (enterprise["Formatted Name"] ||enterprise.FormattedName ||enterprise.Name ||"Unnamed"): "Unnamed";
+    }
 
     function renderEnterprises(list) {
+      options.innerHTML = "";
 
-        options.innerHTML = "";
-
-        if (!list.length) {
-
-            if (noResult) {
-                noResult.style.display = "block";
-            }
-
-            return;
-        }
-
+      if (!list || !list.length) {
         if (noResult) {
-            noResult.style.display = "none";
+          noResult.style.display = "block";
         }
+        return;
+      }
+      if (noResult) {
+        noResult.style.display = "none";
+      }
 
-        list.forEach(function (enterprise) {
+      list.forEach(function (enterprise) {
+        var option = document.createElement("div");
+        option.className = "dropdown-option";
+        option.textContent = getEnterpriseName(enterprise);
+        option.dataset.id = enterprise.Id || "";
 
-            var div = document.createElement("div");
-            div.className = "dropdown-option";
+        option.onclick = async function (e) {
+          e.stopPropagation();
+          selectedText.textContent = getEnterpriseName(enterprise);
+          self.selectedLiveWebsiteEnterprise = enterprise;
+          localStorage.setItem("selectedLiveWebsiteEnterprise",JSON.stringify(enterprise));
 
-            div.textContent =
-                enterprise["Formatted Name"] ||
-                enterprise.FormattedName ||
-                enterprise.Name ||
-                "Unnamed";
+          dropdown.style.display = "none";
 
-            div.dataset.id = enterprise.Id;
+          // Enterprise changed,
+          // therefore old brand/website selection is no longer valid.
+          self.selectedBrand = null;
+          self.selectedLiveWebsite = null;
+          self.currentBrandId = null;
+          self.currentLiveWebsiteId = null;
+          self.brands = [];
+          self.liveWebsiteLibraries = [];
 
-            div.onclick = async function (e) {
+          localStorage.removeItem("selectedLiveWebsiteBrand");
+          localStorage.removeItem("selectedLiveWebsite");
 
-                e.stopPropagation();
+          var brandSection = document.getElementById("brandSection");
 
-                selectedText.textContent = div.textContent;
+          if (brandSection) {
+            brandSection.style.display = "block";
+          }
 
-                self.selectedLiveWebsiteEnterprise = enterprise;
-
-                localStorage.setItem(
-                    "selectedLiveWebsiteEnterprise",
-                    JSON.stringify(enterprise)
-                );
-
-                dropdown.style.display = "none";
-
-                var brandSection = document.getElementById("brandSection");
-
-                if (brandSection) {
-                    brandSection.style.display = "block";
-                }
-
-                await self.loadBrands(enterprise);
-            };
-
-            options.appendChild(div);
-        });
-    }
-
-    renderEnterprises(this.enterprises || []);
-
-    if (search) {
-
-        search.oninput = function (e) {
-
-            e.stopPropagation();
-
-            var value = this.value.toLowerCase();
-
-            var filtered = (self.enterprises || []).filter(function (enterprise) {
-
-                var name =
-                    enterprise["Formatted Name"] ||
-                    enterprise.FormattedName ||
-                    enterprise.Name ||
-                    "";
-
-                return name.toLowerCase().includes(value);
-            });
-
-            renderEnterprises(filtered);
+          await self.loadBrands(enterprise);
         };
+        options.appendChild(option);
+      });
+    }
+    // Initial enterprise list
+    renderEnterprises(this.enterprises || []);
+    // Enterprise search
+    if (search) {
+      search.oninput = function (e) {
+        e.stopPropagation();
+        var value = this.value.trim().toLowerCase();
+        var filtered = (self.enterprises || []).filter(function (enterprise) {
+          return getEnterpriseName(enterprise).toLowerCase().includes(value);
+        });
+        renderEnterprises(filtered);
+      };
     }
 
+    // Enterprise dropdown toggle
     input.onclick = function (e) {
-
-        e.stopPropagation();
-
-        var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
-
-        if (brandDropdown) {
-            brandDropdown.style.display = "none";
-        }
-
-        dropdown.style.display =
-            dropdown.style.display === "block"
-                ? "none"
-                : "block";
+      e.stopPropagation();
+      var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
+      if (brandDropdown) {
+        brandDropdown.style.display = "none";
+      }
+      dropdown.style.display = dropdown.style.display === "block" ? "none": "block";
     };
 
     dropdown.onclick = function (e) {
-        e.stopPropagation();
+      e.stopPropagation();
     };
 
-    // Restore previously selected enterprise
+    // Restore saved enterprise
     var enterpriseToLoad = null;
 
     if (this.selectedLiveWebsiteEnterprise) {
-
-        enterpriseToLoad = (this.enterprises || []).find(function (e) {
-            return e.Id == self.selectedLiveWebsiteEnterprise.Id;
-        });
+      enterpriseToLoad = (this.enterprises || []).find(function (enterprise) {
+        return enterprise.Id == self.selectedLiveWebsiteEnterprise.Id;
+      });
     }
 
-    // Default to LivePlatform only if nothing is saved
+    // Default enterprise
     if (!enterpriseToLoad) {
-
-        enterpriseToLoad = (this.enterprises || []).find(function (enterprise) {
-
-            var name =
-                enterprise["Formatted Name"] ||
-                enterprise.FormattedName ||
-                enterprise.Name ||
-                "";
-
-            return name.toLowerCase() === "liveplatform";
-        });
+      enterpriseToLoad = (this.enterprises || []).find(function (enterprise) {
+        return getEnterpriseName(enterprise).toLowerCase() === "liveplatform";
+      });
     }
 
-    if (enterpriseToLoad) {
-
-    selectedText.textContent =
-        enterpriseToLoad["Formatted Name"] ||
-        enterpriseToLoad.FormattedName ||
-        enterpriseToLoad.Name;
-
+    if (!enterpriseToLoad) {
+      return;
+    }
+    selectedText.textContent = getEnterpriseName(enterpriseToLoad);
     this.selectedLiveWebsiteEnterprise = enterpriseToLoad;
-
-    localStorage.setItem(
-        "selectedLiveWebsiteEnterprise",
-        JSON.stringify(enterpriseToLoad)
-    );
+    localStorage.setItem("selectedLiveWebsiteEnterprise",JSON.stringify(enterpriseToLoad));
 
     var brandSection = document.getElementById("brandSection");
-
     if (brandSection) {
-        brandSection.style.display = "block";
+      brandSection.style.display = "block";
     }
-
-    // Already loaded? Then don't reload.
-    if (
-        this.currentEnterpriseId !== enterpriseToLoad.Id ||
-        !this.brands ||
-        !this.brands.length
-    ) {
-
-        this.currentEnterpriseId = enterpriseToLoad.Id;
-
-        await this.loadBrands(enterpriseToLoad);
+    // Load brands only when required
+    if (this.currentEnterpriseId !== enterpriseToLoad.Id ||!Array.isArray(this.brands) ||!this.brands.length) {
+      this.currentEnterpriseId = enterpriseToLoad.Id;
+      await this.loadBrands(enterpriseToLoad);
     }
-}
-
-    document.addEventListener("click", function () {
-        dropdown.style.display = "none";
-    });
-},
+  },
   loadBrands: async function (enterprise) {
-    if (brandInput) {
-        brandInput.classList.add("disabled");
-        brandInput.classList.add("loading");
-    }
-
-    if (selectedText) {
-        selectedText.textContent = "";
-    }
-    if (!enterprise) {
-      return;
-    }
-
-    // Don't reload brands if same enterprise already loaded
-if (
-    this.currentEnterpriseId === enterprise.Id &&
-    this.brands &&
-    this.brands.length
-) {
-
-    var brandInput = document.getElementById("liveWebsiteBrandInput");
-
-    if (brandInput && this.selectedBrand) {
-
-        var text = brandInput.querySelector(".selected-text");
-
-        if (text) {
-
-            text.textContent =
-                this.selectedBrand.Name ||
-                this.selectedBrand.name ||
-                (this.selectedBrand.Fields && this.selectedBrand.Fields.Name) ||
-                "";
-        }
-    }
-
-    return;
-}
     var brandInput = document.getElementById("liveWebsiteBrandInput");
     var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
-    if (!brandInput || !brandDropdown) {
+
+    if (!brandInput || !brandDropdown || !enterprise) {
       return;
     }
+
     var selectedText = brandInput.querySelector(".selected-text");
     var search = brandDropdown.querySelector(".search");
     var options = brandDropdown.querySelector(".options");
     var noResult = brandDropdown.querySelector(".no-result");
 
-    if (!selectedText || !search || !options) {
+    if (!selectedText || !options) {
       return;
     }
+
+    var self = this;
+    function getBrandName(brand) {
+      if (!brand) {
+        return "Unnamed Brand";
+      }
+      return (brand.Name ||brand.name ||(brand.Fields && brand.Fields.Name) ||"Unnamed Brand");
+    }
+
+    // Already loaded
+    if (this.currentEnterpriseId === enterprise.Id && Array.isArray(this.brands) && this.brands.length) {
+      if (this.selectedBrand) {
+        selectedText.textContent = getBrandName(this.selectedBrand);
+      }
+
+      brandInput.classList.remove("disabled");
+      brandInput.classList.remove("loading");
+
+      return;
+    }
+
     brandInput.classList.add("disabled");
-    selectedText.textContent = "";
     brandInput.classList.add("loading");
+
+    selectedText.textContent = "";
+
     var oldDomain = GlobalDomain;
     GlobalDomain = "https://liveplatform.com";
+
     try {
       utils.showContextLoader();
       var cloudName = "[" + enterprise.Id + "]Brands";
-      var brandCloud = await utils.getCloud( enterprise["Direct Resource Identifier"],cloudName);
+      var brandCloud = await utils.getCloud(enterprise["Direct Resource Identifier"],cloudName);
       if (!brandCloud || !brandCloud.DRI) {
         selectedText.textContent = "No Brands Found";
+        this.brands = [];
         return;
       }
+
       this.brandCloudDRI = brandCloud.DRI;
       var data = await utils.getItems(brandCloud.DRI,"Name",true,1,9999);
-      this.brands = data.Results || data.Items || [];
-      this.brands = Array.isArray(data.Results) ? data.Results : [];
 
-      var self = this;
-      options.innerHTML = "";
+      if (Array.isArray(data.Results)) {
+        this.brands = data.Results;
+      } else if (Array.isArray(data.Items)) {
+        this.brands = data.Items;
+      } else {
+        this.brands = [];
+      }
 
-      var renderBrands = function (list) {
+
+      function renderBrands(list) {
         options.innerHTML = "";
-        if (!list.length) {
-          noResult.style.display = "block";
+
+        if (!list || !list.length) {
+          if (noResult) {
+            noResult.style.display = "block";
+          }
           return;
         }
+        if (noResult) {
+            noResult.style.display = "none";
+        }
 
-        noResult.style.display = "none";
         list.forEach(function (brand) {
           var option = document.createElement("div");
           option.className = "dropdown-option";
-
-          option.textContent = brand.Name ||brand.name ||brand.Fields.Name ||"Unnamed Brand";
-          option.onclick = async function (e) {
+          option.textContent = getBrandName(brand);
+          option.addEventListener("click", async function (e) {
+            e.preventDefault();
             e.stopPropagation();
-            var brandName = brand.Name || brand.name || brand.Fields?.Name || "Unnamed Brand";
-            selectedText.textContent = brandName;
-            brandDropdown.style.display = "none";
+            console.log("BRAND SELECTED:", brand);
+            selectedText.textContent = getBrandName(brand);
             self.selectedBrand = brand;
-
             localStorage.setItem("selectedLiveWebsiteBrand",JSON.stringify(brand));
-            utils.showContextLoader("liveWebsiteTree");
+
+            brandDropdown.style.display = "none";
+
+            // Reset old website
+            self.selectedLiveWebsite = null;
+            self.currentLiveWebsiteId = null;
+
+            localStorage.removeItem("selectedLiveWebsite");
+
             try {
-              await self.loadLiveWebsiteLibrary(enterprise, brand);
+              utils.showContextLoader("liveWebsiteTree");
+              await self.loadLiveWebsiteLibrary(enterprise,brand);
+            }
+            catch (error) {
+              console.error("Load LiveWebsite Library Error:",error);
             }
             finally {
               utils.hideContextLoader("liveWebsiteTree");
             }
-          };
+          });
           options.appendChild(option);
         });
-      }.bind(this);
+      }
       renderBrands(this.brands);
-      // Restore previously selected Brand
+      // Restore previously selected brand
       if (this.selectedBrand) {
+        var savedBrand = this.brands.find(function (brand) {
+          return (brand.Id === self.selectedBrand.Id ||getBrandName(brand) === getBrandName(self.selectedBrand));
+        });
 
-          var savedBrand = this.brands.find(function (b) {
-              return b.Id === self.selectedBrand.Id ||
-                    b.Name === self.selectedBrand.Name;
+        if (savedBrand) {
+          selectedText.textContent = getBrandName(savedBrand);
+          this.selectedBrand = savedBrand;
+          localStorage.setItem("selectedLiveWebsiteBrand",JSON.stringify(savedBrand));
+          await this.loadLiveWebsiteLibrary(enterprise,savedBrand);
+        }
+      }
+
+      // Search
+      if (search) {
+        search.oninput = function (e) {
+          e.stopPropagation();
+          var value = this.value.trim().toLowerCase();
+          var filtered = (self.brands || []).filter(function (brand) {
+            return getBrandName(brand).toLowerCase().includes(value);
           });
 
-          if (savedBrand) {
-
-              selectedText.textContent =
-                  savedBrand.Name ||
-                  savedBrand.name ||
-                  (savedBrand.Fields && savedBrand.Fields.Name) ||
-                  "Unnamed Brand";
-
-              this.selectedBrand = savedBrand;
-
-              localStorage.setItem(
-                  "selectedLiveWebsiteBrand",
-                  JSON.stringify(savedBrand)
-              );
-
-              await this.loadLiveWebsiteLibrary(enterprise, savedBrand);
-          }
+          renderBrands(filtered);
+        };
       }
-      search.oninput = function () {
-        var value = this.value.toLowerCase();
-        var brands = Array.isArray(self.brands) ? self.brands : [];
-        var filtered = brands.filter(function (brand) {
-          var name = brand.Name ||brand.name ||(brand.Fields && brand.Fields.Name) ||"";
-          return name.toLowerCase().includes(value);
-        });
-        renderBrands(filtered);
-      };
       brandInput.onclick = function (e) {
         e.stopPropagation();
-        brandDropdown.style.display = brandDropdown.style.display === "block" ? "none" : "block";
+        if (brandInput.classList.contains("disabled")) {
+          return;
+        }
+        var enterpriseDropdown = document.getElementById("liveWebsiteEnterpriseDropdown");
+
+        if (enterpriseDropdown) {
+          enterpriseDropdown.style.display = "none";
+        }
+        brandDropdown.style.display = brandDropdown.style.display === "block"? "none": "block";
       };
+
       brandDropdown.onclick = function (e) {
         e.stopPropagation();
       };
-      // if (this.brands.length) {
-      //   var defaultBrand = this.brands[0];
-      //   selectedText.textContent = defaultBrand.Name;
-      //   this.selectedBrand = defaultBrand;
-      //   localStorage.setItem("selectedLiveWebsiteBrand",JSON.stringify(defaultBrand));
-      //   await this.loadLiveWebsiteLibrary(enterprise,defaultBrand);
-      // }
-      brandInput.classList.remove("disabled");
+    }
+    catch (error) {
+      console.error("Load brands error:", error);
+      selectedText.textContent = "Failed to load brands";
+      this.brands = [];
+    }
+    finally {
       brandInput.classList.remove("loading");
-    }
-    catch(error){
-      if (selectedText) {
-        selectedText.textContent = "Failed to load brands";
-    }
-
-    if (brandInput) {
-        brandInput.classList.remove("loading");
-        brandInput.classList.remove("disabled");
-    }
-    }
-    finally{
-      if (brandInput) {
-        brandInput.classList.remove("loading");
-        brandInput.classList.remove("disabled");
-      }
+      brandInput.classList.remove("disabled");
       utils.hideContextLoader();
       GlobalDomain = oldDomain;
     }
   },
-loadLiveWebsiteLibrary: async function (enterprise, brand) {
-    if (!enterprise || !brand) return;
+  loadLiveWebsiteLibrary: async function (enterprise, brand) {
+    if (!enterprise || !brand) {
+      return;
+    }
 
     var self = this;
 
-    // Already loaded for this brand
-    if (
-        this.currentBrandId === brand.Id &&
-        this.liveWebsiteLibraries &&
-        this.liveWebsiteLibraries.length
-    ) {
+    // Same brand already loaded
+    if (this.currentBrandId === brand.Id && Array.isArray(this.liveWebsiteLibraries) && this.liveWebsiteLibraries.length) {
+      this.renderLiveWebsiteLibrary();
+      // Restore selected website
+      if (this.selectedLiveWebsite) {
+        var selectedWebsite = this.liveWebsiteLibraries.find(function (website) {
+          return (website.Id === self.selectedLiveWebsite.Id ||website.Name === self.selectedLiveWebsite.Name);
+        });
 
-        var tree = document.getElementById("liveWebsiteTree");
+        if (selectedWebsite) {
+          self.selectedLiveWebsite = selectedWebsite;
+          self.currentLiveWebsiteId = selectedWebsite.Id;
 
-        if (tree) {
-
-            tree.innerHTML = "";
-
-            this.liveWebsiteLibraries.forEach(function (website) {
-
-                var item = document.createElement("span");
-                item.className = "livewebsite-item";
-                item.textContent = website.Name || "Unnamed";
-
-                if (
-                    self.selectedLiveWebsite &&
-                    self.selectedLiveWebsite.Id === website.Id
-                ) {
-                    item.classList.add("selected");
-
-                    // First time only restore files
-                      if (!self.liveWebsiteFilesRestored) {
-                        self.liveWebsiteFilesRestored = true;
-
-                        setTimeout(async function () {
-                            await self.loadLiveWebsiteFiles(website);
-                        }, 0);
-                    }
-                }
-
-                item.onclick = async function () {
-
-                    tree.querySelectorAll(".livewebsite-item").forEach(function (x) {
-                        x.classList.remove("selected");
-                    });
-
-                    item.classList.add("selected");
-
-                    self.selectedLiveWebsite = website;
-                    self.currentLiveWebsiteId = website.Id;
-
-                    localStorage.setItem(
-                        "selectedLiveWebsite",
-                        JSON.stringify(website)
-                    );
-
-                    utils.showContextLoader("commonTableContainer");
-
-                    try {
-                        await self.loadLiveWebsiteFiles(website);
-                    }
-                    finally {
-                        utils.hideContextLoader("commonTableContainer");
-                    }
-                };
-
-                tree.appendChild(item);
-            });
-
-              if (this.selectedLiveWebsite) {
-                var selectedWebsite = this.liveWebsiteLibraries.find(function (w) {
-                    return w.Id === self.selectedLiveWebsite.Id ||
-                          w.Name === self.selectedLiveWebsite.Name;
-                });
-
-                if (selectedWebsite) {
-
-                    self.selectedLiveWebsite = selectedWebsite;
-                    self.currentLiveWebsiteId = selectedWebsite.Id;
-
-                    tree.querySelectorAll(".livewebsite-item").forEach(function (item) {
-                        item.classList.toggle(
-                            "selected",
-                            item.textContent === (selectedWebsite.Name || "")
-                        );
-                    });
-
-                    await self.loadLiveWebsiteFiles(selectedWebsite);
-                }
-            }
+          self.renderLiveWebsiteLibrary();
+          await self.loadLiveWebsiteFiles(selectedWebsite);
         }
-
-        return;
+      }
+      return;
     }
-
     this.currentBrandId = brand.Id;
 
     var oldDomain = GlobalDomain;
     GlobalDomain = "https://liveplatform.com";
 
     try {
+      var brandDRI = brand["Direct Resource Identifier"] ||brand.DRI;
+      var brandId = brand.Id;
+      if (!brandDRI || !brandId) {
+        console.warn("Brand DRI or ID missing.");
+        return;
+      }
 
-        var brandDRI =
-            brand["Direct Resource Identifier"] ||
-            brand.DRI;
+      var cloudName = "[" + brandId + "]LiveWebsite Library";
 
-        var brandId = brand.Id;
+      var libraryCloud = await utils.getCloud(brandDRI,cloudName);
+      if (!libraryCloud || !libraryCloud.DRI) {
+        console.warn("LiveWebsite Library cloud not found.");
+        return;
+      }
+      this.libraryCloudDRI = libraryCloud.DRI;
+      var data = await utils.getItems(libraryCloud.DRI,"Name",true,1,9999);
+      this.liveWebsiteLibraries = Array.isArray(data.Results) ? data.Results : Array.isArray(data.Items) ? data.Items: [];
 
-        var libraryCloud = await utils.getCloud(
-            brandDRI,
-            "[" + brandId + "]LiveWebsite Library"
-        );
+      this.renderLiveWebsiteLibrary();
 
-        if (!libraryCloud || !libraryCloud.DRI) {
-            console.warn("LiveWebsite Library cloud not found.");
-            return;
-        }
-
-        this.libraryCloudDRI = libraryCloud.DRI;
-
-        var data = await utils.getItems(
-            libraryCloud.DRI,
-            "Name",
-            true,
-            1,
-            9999
-        );
-
-        this.liveWebsiteLibraries =
-            data.Results ||
-            data.Items ||
-            [];
-
-        var tree = document.getElementById("liveWebsiteTree");
-
-        if (!tree) {
-            return;
-        }
-
-        tree.innerHTML = "";
-
-        this.liveWebsiteLibraries.forEach(function (website) {
-
-            var item = document.createElement("span");
-            item.className = "livewebsite-item";
-            item.textContent = website.Name || "Unnamed";
-
-            if (
-                self.selectedLiveWebsite &&
-                self.selectedLiveWebsite.Id === website.Id
-            ) {
-                item.classList.add("selected");
-            }
-
-            item.onclick = async function () {
-
-                tree.querySelectorAll(".livewebsite-item").forEach(function (x) {
-                    x.classList.remove("selected");
-                });
-
-                item.classList.add("selected");
-
-                self.selectedLiveWebsite = website;
-                self.currentLiveWebsiteId = website.Id;
-
-                localStorage.setItem(
-                    "selectedLiveWebsite",
-                    JSON.stringify(website)
-                );
-
-                utils.showContextLoader("commonTableContainer");
-
-                try {
-                    await self.loadLiveWebsiteFiles(website);
-                }
-                finally {
-                    utils.hideContextLoader("commonTableContainer");
-                }
-            };
-
-            tree.appendChild(item);
+      // Restore website
+      if (this.selectedLiveWebsite) {
+        var restored = this.liveWebsiteLibraries.find(function (website) {
+          return (website.Id === self.selectedLiveWebsite.Id ||website.Name === self.selectedLiveWebsite.Name);
         });
-
-        // Restore previously selected website
-        if (this.selectedLiveWebsite) {
-
-            var restored = this.liveWebsiteLibraries.find(function (w) {
-                return w.Id === self.selectedLiveWebsite.Id;
-            });
-
-            if (restored) {
-
-                this.selectedLiveWebsite = restored;
-                this.currentLiveWebsiteId = restored.Id;
-
-                tree.querySelectorAll(".livewebsite-item").forEach(function (item) {
-                    item.classList.toggle(
-                        "selected",
-                        item.textContent === (restored.Name || "")
-                    );
-                });
-                if (this.activeLeftPanelTab === "liveWebsite") {
-                    await this.loadLiveWebsiteFiles(restored);
-                }
-            }
+        if (restored) {
+          this.selectedLiveWebsite = restored;
+          this.currentLiveWebsiteId = restored.Id;
+          this.renderLiveWebsiteLibrary();
+          if (this.activeTabType === "liveWebsite") {
+            await this.loadLiveWebsiteFiles(restored);
+          }
         }
-
+      }
     }
-    catch (e) {
-        console.error("Library Load Error:", e);
+    catch (error) {
+      console.error("LiveWebsite Library Load Error:",error);
     }
     finally {
-        GlobalDomain = oldDomain;
+      GlobalDomain = oldDomain;
     }
-},
+  },
+  renderLiveWebsiteLibrary: function () {
+    var tree = document.getElementById("liveWebsiteTree");
+    if (!tree) {
+      return;
+    }
+
+    tree.innerHTML = "";
+    var self = this;
+    var libraries = Array.isArray(this.liveWebsiteLibraries) ? this.liveWebsiteLibraries : [];
+
+    libraries.forEach(function (website) {
+      var item = document.createElement("span");
+      item.className = "livewebsite-item";
+      item.textContent = website.Name ||website.name ||"Unnamed";
+
+      if (self.selectedLiveWebsite && (self.selectedLiveWebsite.Id === website.Id ||self.selectedLiveWebsite.Name === website.Name)) {
+        item.classList.add("selected");
+      }
+
+      item.onclick = async function (e) {
+        e.stopPropagation();
+        tree.querySelectorAll(".livewebsite-item").forEach(function (x) {
+          x.classList.remove("selected");
+        });
+
+        item.classList.add("selected");
+
+        self.selectedLiveWebsite = website;
+        self.currentLiveWebsiteId = website.Id;
+
+        localStorage.setItem("selectedLiveWebsite",JSON.stringify(website));
+        utils.showContextLoader("commonTableContainer");
+        try {
+          await self.loadLiveWebsiteFiles(website);
+        }
+        finally {
+          utils.hideContextLoader("commonTableContainer");
+        }
+      };
+      tree.appendChild(item);
+    });
+  },
   getLiveWebsiteFiles: async function (library) {
     if (!library) {
       console.warn("LiveWebsite library missing.");
@@ -3240,22 +3027,28 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
     var oldDomain = GlobalDomain;
     GlobalDomain = "https://liveplatform.com";
     try {
-      var libraryDRI =library["Direct Resource Identifier"] ||library.DRI;
-      var libraryId =library.Id;
-      if (!libraryDRI) {
+      var libraryDRI = library["Direct Resource Identifier"] || library.DRI;
+      var libraryId = library.Id;
+
+      if (!libraryDRI || !libraryId) {
+        console.warn("Library DRI or ID missing.");
         return [];
       }
-      var filesCloud = await utils.getCloud(libraryDRI,"[" + libraryId + "]Files");
-      console.log("LiveWebsite Files Cloud:",filesCloud);
+
+      var cloudName = "[" + libraryId + "]Files";
+      var filesCloud = await utils.getCloud(libraryDRI,cloudName);
+
       if (!filesCloud || !filesCloud.DRI) {
+        console.warn("Files cloud not found:",cloudName);
         return [];
       }
       this.liveWebsiteFilesCloudDRI = filesCloud.DRI;
       var data = await utils.getItems(filesCloud.DRI,"Name||Created By||Created On",true,1,9999);
-      var files = data.Results || [];
-      return files;
+
+      return Array.isArray(data.Results) ? data.Results : Array.isArray(data.Items)? data.Items: [];
     }
     catch (error) {
+      console.error("Get LiveWebsite Files Error:",error);
       return [];
     }
     finally {
@@ -3264,10 +3057,11 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
   },
   loadLiveWebsiteFiles: async function (library) {
     if (!library) {
-          return;
-      }
-
-      this.selectedLiveWebsite = library;
+      return;
+    }
+    this.selectedLiveWebsite = library;
+    this.currentLiveWebsiteId = library.Id;
+    localStorage.setItem("selectedLiveWebsite",JSON.stringify(library));
     var self = this;
     var common = this.showCommonContextBox({
       label: library.Name || "Live Website",
@@ -3275,38 +3069,68 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
       showRefresh: false
     });
 
-    if (!common) return;
+    if (!common) {
+      return;
+    }
+
     var container = common.container;
     var search = common.search;
-    var files = await this.getLiveWebsiteFiles(library);
-    new drawTable({
-      container: container,
-      data: files,
-      fields: [
-        {
-          label: "Name",
-          field: "Name"
-        },
-        {
-          label: "Created By",
-          field: "Created By"
-        },
-        {
-          label: "Created On",
-          field: "Created On"
-        }
-      ],
-      emptyText: "No Files Found",
-      onRowClick: function (file) {
-        self.openLiveWebsiteFile(file);
+
+    utils.showContextLoader("commonTableContainer");
+
+    try {
+      var cacheKey = library.Id || library.Name;
+      if (!this.liveWebsiteFilesCache) {
+        this.liveWebsiteFilesCache = new Map();
       }
-    });
-    search.oninput = function () {
-      var text = this.value.toLowerCase();
-      container.querySelectorAll("tbody tr").forEach(function (row) {
-        row.style.display = row.textContent.toLowerCase().includes(text) ? "" : "none";
+      var files;
+      if (this.liveWebsiteFilesCache.has(cacheKey)) {
+        // Already loaded
+        files = this.liveWebsiteFilesCache.get(cacheKey);
+      } else {
+        // First load only
+        files = await this.getLiveWebsiteFiles(library);
+        this.liveWebsiteFilesCache.set(cacheKey, files);
+      }
+
+      new drawTable({
+        container: container,
+        data: files,
+        fields: [
+          {
+            label: "Name",
+            field: "Name"
+          },
+          {
+            label: "Created By",
+            field: "Created By"
+          },
+          {
+            label: "Created On",
+            field: "Created On"
+          }
+        ],
+        emptyText: "No Files Found",
+
+        onRowClick: function (file) {
+          self.openLiveWebsiteFile(file);
+        }
       });
-    };
+
+      if (search) {
+        search.oninput = function () {
+          var text = this.value.toLowerCase().trim();
+          container.querySelectorAll("tbody tr").forEach(function (row) {
+            row.style.display = row.textContent.toLowerCase().includes(text) ? "" : "none";
+          });
+        };
+      }
+
+    } catch (error) {
+      console.error("Load LiveWebsite Files Error:", error);
+    } finally {
+      utils.hideContextLoader("commonTableContainer");
+    }
   },
   getLiveWebsiteFileName: function (file) {
     if (!file) return "untitled.txt";
@@ -3348,58 +3172,75 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
     return ["html", "css", "js", "xml", "htm", "frm", "json"].includes(ext);
   },
   openLiveWebsiteFile: function (file) {
+    if (!file) {
+      return;
+    }
     var fileName = this.getLiveWebsiteFileName(file);
     var editor = document.getElementById("monacoEditor");
-    if (!editor) return;
-    // Monaco Editor show
+    if (!editor || !this.monacoEditor) {
+      return;
+    }
+    // Show Monaco
     editor.style.display = "block";
 
-    // Hide Push Queues if open
+    // Keep LiveWebsite panel visible
+    var liveWebsitePanel = document.getElementById("liveWebsitePanel");
+
+    if (liveWebsitePanel) {
+      liveWebsitePanel.style.display = "block";
+    }
+    // Hide Push Queues
     var pushQueuesContainer = document.getElementById("pushQueuesContainer");
+
     if (pushQueuesContainer) {
       pushQueuesContainer.style.display = "none";
     }
 
+    // File type validation
     if (!this.isAllowedLiveWebsiteFile(fileName)) {
-      utils.showSnackbar("This file type is not allowed for editing.", "warning");
+      utils.showSnackbar("This file type is not allowed for editing.","warning");
       var messageModel = monaco.editor.createModel("File type not allowed for editing.","plaintext");
+
       this.monacoEditor.setModel(messageModel);
       this.monacoEditor.focus();
       return;
     }
 
-    var content = this.getLiveWebsiteFileContent(file);
-    var language = this.getMonacoLanguage(fileName);
+    // Check existing tab
+    var existing = this.allContexts.find(function (tab) {
 
-    // Check if already open
-    var existing = this.allContexts.find(t => t.fileName === fileName);
+      return (tab.type === "LiveWebsite" && tab.fileName === fileName);
+    });
 
     if (existing) {
-      this.switchContext(existing.id);
+      this.currentContextId = existing.id;
+      this.monacoEditor.setModel(existing.model);
+      this.renderTabs();
+      this.renderAiMessages(existing);
+      this.monacoEditor.focus();
       return;
     }
-
-    var model = monaco.editor.createModel(content, language);
-
+    var content = this.getLiveWebsiteFileContent(file);
+    var language = this.getMonacoLanguage(fileName);
+    var model = monaco.editor.createModel(content,language);
     var tab = {
       id: "website_" + Date.now(),
       name: fileName,
       fileName: fileName,
       type: "LiveWebsite",
       model: model,
-      originalContent: model.getValue(),
+      originalContent:
+        model.getValue(),
       liveWebsiteFile: file,
       aiMessages: [],
       lastAIResult: null
     };
-
     this.allContexts.push(tab);
     this.currentContextId = tab.id;
-
     this.monacoEditor.setModel(model);
     this.renderTabs();
     this.renderAiMessages(tab);
-
+    this.monacoEditor.layout();
     this.monacoEditor.focus();
   },
   getFileIcon: function (fileName) {
@@ -3518,10 +3359,7 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
     };
     if (label) {
       label.onclick = (e) => {
-         console.log("Projects Label Click");
         e.stopPropagation();
-        console.log("Project Root:", this.projectRoot);
-        console.log("Tree:", this.projectTreeItems);
         if (!this.projectRoot) {
           return;
         }
@@ -3542,7 +3380,6 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
         };
         this.selectedProjectFolder = rootFolder.path;
         this.selectedProjectFolderData = rootFolder;
-        console.log("Before showProjectFolderFiles");
         this.showProjectFolderFiles(rootFolder,true);
       };
     }
@@ -3644,62 +3481,49 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
         }
 
         folderToggle.onclick = function (e) {
-            e.stopPropagation();
+          e.stopPropagation();
+          if (!hasFolders) return;
+          var isOpen = children.style.display === "block";
 
-            if (!hasFolders) return;
+          if (isOpen) {
+            children.style.display = "none";
+            folderToggle.textContent = "[+]";
+            self.expandedFolders[folder.path] = false;
+            return;
+          }
 
-            var isOpen = children.style.display === "block";
+          children.style.display = "block";
+          folderToggle.textContent = "[-]";
+          self.expandedFolders[folder.path] = true;
 
-            if (isOpen) {
-                children.style.display = "none";
-                folderToggle.textContent = "[+]";
-                self.expandedFolders[folder.path] = false;
-                return;
-            }
-
-            children.style.display = "block";
-            folderToggle.textContent = "[-]";
-            self.expandedFolders[folder.path] = true;
-
-            if (children.dataset.loaded !== "true") {
-                renderFolders(folder.children || [], children, level + 1);
-                children.dataset.loaded = "true";
-            }
+          if (children.dataset.loaded !== "true") {
+            renderFolders(folder.children || [], children, level + 1);
+            children.dataset.loaded = "true";
+          }
         };
 
         var folderLabel = row.querySelector(".project-folder-label");
 
         folderLabel.onclick = function (e) {
-            e.stopPropagation();
-
-            document.querySelectorAll(".project-item, .project-header").forEach(function (item) {
-                item.classList.remove("tree-selected");
-            });
-
-            row.classList.add("tree-selected");
-
-            var latestFolder = self.findProjectFolderByPath(
-                self.projectTreeItems,
-                folder.path
-            );
-
-            if (!latestFolder) {
-                return;
-            }
-
-            self.selectedProjectFolder = latestFolder.path;
-            self.selectedProjectFolderData = latestFolder;
-
-            self.showProjectFolderFiles(latestFolder, true);
+          e.stopPropagation();
+          document.querySelectorAll(".project-item, .project-header").forEach(function (item) {
+            item.classList.remove("tree-selected");
+          });
+          row.classList.add("tree-selected");
+          var latestFolder = self.findProjectFolderByPath(self.projectTreeItems,folder.path);
+          if (!latestFolder) {
+            return;
+          }
+          self.selectedProjectFolder = latestFolder.path;
+          self.selectedProjectFolderData = latestFolder;
+          self.showProjectFolderFiles(latestFolder, true);
         };
       });
     }
     renderFolders(items || [], body,0);
   },
   showProjectFolderFiles: function (folder, forceReload = false) {
-
     if (!folder) return;
-
     // Prevent reload if same folder is already active
     if (!forceReload &&this.activeTabType === "projects" &&this.selectedProjectFolder === folder.path) {
       return;
@@ -3728,37 +3552,35 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
         this.showCreateProjectFilePopup(folder);
       };
     }
-    console.log("Folder:", folder);
-    console.log("Children:", folder.children);
     var files = (folder.children || []).filter(function (item) {
-        return item.type !== "folder";
+      return item.type !== "folder";
     });
 
     var self = this;
 
     new drawTable({
-        container: container,
-        data: files,
-        fields: [
-          {
-            label: "Name",
-            field: "name"
-          },
-          {
-            label: "Modified On",
-            field: "modifiedOn"
-          },
-          {
-            label: "Source",
-            render: function () {
-              return "Local";
-            }
+      container: container,
+      data: files,
+      fields: [
+        {
+          label: "Name",
+          field: "name"
+        },
+        {
+          label: "Modified On",
+          field: "modifiedOn"
+        },
+        {
+          label: "Source",
+          render: function () {
+            return "Local";
           }
-        ],
-        emptyText: "No Files Found",
-        onRowClick: async function (file) {
-          await self.openProjectFile(file);
         }
+      ],
+      emptyText: "No Files Found",
+      onRowClick: async function (file) {
+        await self.openProjectFile(file);
+      }
     });
 
     search.oninput = function () {
@@ -3933,42 +3755,79 @@ loadLiveWebsiteLibrary: async function (enterprise, brand) {
     };
   },
   initializeLiveWebsiteDropdowns: function () {
-    document.addEventListener("click", function (e) {
-      var enterpriseInput = document.getElementById("liveWebsiteEnterpriseInput");
-      var enterpriseDropdown = document.getElementById("liveWebsiteEnterpriseDropdown");
-      var brandInput = document.getElementById("liveWebsiteBrandInput");
-      var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
+    var enterpriseInput = document.getElementById("liveWebsiteEnterpriseInput");
+    var enterpriseDropdown = document.getElementById("liveWebsiteEnterpriseDropdown");
+    var brandInput = document.getElementById("liveWebsiteBrandInput");
+    var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
+    // Enterprise
+    if (enterpriseInput && enterpriseDropdown) {
+      enterpriseInput.onclick = function (e) {
+        e.stopPropagation();
+        if (brandDropdown) {
+          brandDropdown.style.display = "none";
+        }
+        enterpriseDropdown.style.display = enterpriseDropdown.style.display === "block"? "none": "block";
+      };
 
-      if (enterpriseInput && enterpriseDropdown && !enterpriseInput.contains(e.target) && !enterpriseDropdown.contains(e.target)) {
+      enterpriseDropdown.onclick = function (e) {
+        e.stopPropagation();
+      };
+    }
+
+    // Brand
+    if (brandInput && brandDropdown) {
+      brandInput.onclick = function (e) {
+        e.stopPropagation();
+        if (enterpriseDropdown) {
+          enterpriseDropdown.style.display = "none";
+        }
+        brandDropdown.style.display = brandDropdown.style.display === "block"? "none": "block";
+      };
+
+      brandDropdown.onclick = function (e) {
+        e.stopPropagation();
+      };
+    }
+
+    // Outside click
+    document.addEventListener("click",function (e) {
+      if (enterpriseInput && enterpriseDropdown &&!enterpriseInput.contains(e.target) && !enterpriseDropdown.contains(e.target)) {
         enterpriseDropdown.style.display = "none";
       }
-
       if (brandInput && brandDropdown && !brandInput.contains(e.target) && !brandDropdown.contains(e.target)) {
         brandDropdown.style.display = "none";
       }
     });
+  },
 
-    // Enterprise click
-    var enterpriseInput = document.getElementById("liveWebsiteEnterpriseInput");
-    var enterpriseDropdown = document.getElementById("liveWebsiteEnterpriseDropdown");
-    var brandDropdown = document.getElementById("liveWebsiteBrandDropdown");
+  getApiResults: function (data) {
+    if (!data) {
+      return [];
+    }
+    if (Array.isArray(data.Results)) {
+      return data.Results;
+    }
+    if (Array.isArray(data.Items)) {
+      return data.Items;
+    }
+    if (Array.isArray(data)) {
+      return data;
+    }
+    return [];
+  },
+  clearCaches: function () {
+    this.nodeCache = {
+      OT: {},
+      Category: {},
+      CloudType: {}
+    };
+    this.contextCache = {
+      ObjectType: {},
+      Category: {},
+      CloudType: {}
+    };
 
-    if (enterpriseInput) {
-      enterpriseInput.addEventListener("click", function () {
-        if (brandDropdown) {
-          brandDropdown.style.display = "none";
-        }
-      });
-    }
-    // Brand click
-    var brandInput = document.getElementById("liveWebsiteBrandInput");
-    if (brandInput) {
-      brandInput.addEventListener("click", function () {
-        if (enterpriseDropdown) {
-          enterpriseDropdown.style.display = "none";
-        }
-      });
-    }
+    this.contextLoading = {};
   },
 };
 window.editorInstance = new codeEditor();
