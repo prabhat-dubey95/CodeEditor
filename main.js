@@ -459,187 +459,128 @@ ipcMain.handle(
 );
 
 
-ipcMain.handle(
-    "createProjectFolder",
-    async function (event, folderPath) {
-
-        try {
-
-            if (!folderPath) {
-
-                return {
-
-                    success: false,
-
-                    error: "Folder path is required."
-
-                };
-
-            }
-
-
-            fs.mkdirSync(
-                folderPath,
-                {
-                    recursive: true
-                }
-            );
-
-
+ipcMain.handle("createProjectFolder",async function (event, folderPath) {
+    try {
+        if (!folderPath) {
             return {
-
-                success: true,
-
-                path: folderPath
-
-            };
-
-        }
-        catch (err) {
-
-            console.error(
-                "createProjectFolder Error:",
-                err
-            );
-
-
-            return {
-
                 success: false,
-
-                error: err.message
-
+                error: "Folder path is required."
             };
-
         }
+
+        fs.mkdirSync(folderPath, {
+            recursive: true
+        });
+        return {
+            success: true,
+            path: folderPath
+        };
 
     }
-);
+    catch (err) {
+        console.error("createProjectFolder Error:",err);
+        return {
+            success: false,
+            error: err.message
+        };
+    }
+});
 
 
-ipcMain.handle(
-    "createProjectFile",
-    async function (event, filePath) {
-
-        try {
-
-            if (!filePath) {
-
-                return {
-
-                    success: false,
-
-                    error: "File path is required."
-
-                };
-
-            }
-
-
-            var parentFolder =
-                path.dirname(
-                    filePath
-                );
-
-
-            if (!fs.existsSync(parentFolder)) {
-
-                fs.mkdirSync(
-                    parentFolder,
-                    {
-                        recursive: true
-                    }
-                );
-
-            }
-
-
-            if (fs.existsSync(filePath)) {
-
-                return {
-
-                    success: false,
-
-                    error: "File already exists."
-
-                };
-
-            }
-
-
-            fs.writeFileSync(
-                filePath,
-                "",
-                "utf8"
-            );
-
-
+ipcMain.handle("createProjectFile",async function (event, filePath) {
+    try {
+        if (!filePath) {
             return {
-
-                success: true,
-
-                path: filePath,
-
-                fileName:
-                    path.basename(
-                        filePath
-                    )
-
-            };
-
-        }
-        catch (err) {
-
-            console.error(
-                "createProjectFile Error:",
-                err
-            );
-
-
-            return {
-
                 success: false,
-
-                error: err.message
-
+                error: "File path is required."
             };
-
         }
+        var parentFolder = path.dirname(filePath);
+        if (!fs.existsSync(parentFolder)) {
+
+            fs.mkdirSync(parentFolder,{
+                recursive: true
+            });
+        }
+
+        if (fs.existsSync(filePath)) {
+            return {
+                success: false,
+                error: "File already exists."
+            };
+        }
+
+        fs.writeFileSync(filePath,"","utf8");
+
+        return {
+            success: true,
+            path: filePath,
+            fileName:
+            path.basename(filePath)
+        };
 
     }
-);
-
-
-ipcMain.handle(
-    "fileExists",
-    async function (event, filePath) {
-
-        try {
-
-            if (!filePath) {
-                return false;
-            }
-
-
-            return fs.existsSync(
-                filePath
-            );
-
+    catch (err) {
+        console.error("createProjectFile Error:",err);
+        return {
+            success: false,
+            error: err.message
+        };
+    }
+});
+ipcMain.handle("deleteProjectFile",async function (event, filePath) {
+    try {
+        if (!filePath) {
+            return {
+                success: false,
+                error: "File path is required."
+            };
         }
-        catch (err) {
 
-            console.error(
-                "fileExists Error:",
-                err
-            );
+        if (!fs.existsSync(filePath)) {
+            return {
+                success: false,
+                error: "File not found."
+            };
+        }
 
+        var stat = fs.statSync(filePath);
 
+        if (!stat.isFile()) {
+            return {
+                success: false,
+                error: "Selected path is not a file."
+            };
+        }
+        fs.unlinkSync(filePath);
+        console.log("Project file deleted:",filePath);
+        return {
+            success: true,
+            path: filePath
+        };
+
+    } catch (err) {
+        console.error("deleteProjectFile Error:",err);
+        return {
+            success: false,
+            error: err.message
+        };
+    }
+});
+ipcMain.handle("fileExists",async function (event, filePath) {
+    try {
+        if (!filePath) {
             return false;
-
         }
+        return fs.existsSync(filePath);
 
     }
-);
+    catch (err) {
+        console.error("fileExists Error:",err);
+        return false;
+
+    }
+});
 
 app.whenReady().then(() => {
   // Configure session to accept cookies
