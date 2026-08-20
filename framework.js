@@ -118,7 +118,6 @@ utils.getCloud = function (dri, cloudName) {
     return data.Results;
   });
 };
-
 utils.getItems = function (dri, fields, refresh, pageNumber, ResultCount) {
   var page = pageNumber || 1;
   var resultCount = ResultCount || 100;
@@ -134,6 +133,40 @@ utils.getItems = function (dri, fields, refresh, pageNumber, ResultCount) {
   .then(data => {
     utils.setCloudItemsDetails(cacheKey, data);
     return data;
+  });
+};
+utils.removeItems = function (CloudDRI, ItemId, Confirmed, Callback) {
+  Confirmed = Confirmed == "N" || Confirmed == "undefined" ? false : (Confirmed === "Y" || Confirmed === true ? true : false);
+  if (!CloudDRI || !ItemId) {
+    return;
+  }
+  var url = CloudDRI +"/RemoveItem.do?ItemId=" + ItemId + (Confirmed ? "&Confirmed=Y" : "");
+  if (Confirmed) {
+    utils.showLoader();
+  }
+  useFetch(url)
+  .then(res => res.json())
+  .then(data => {
+    if (data && data["Confirmation Required"] === "Y" && !Confirmed) {
+      if (confirm(data.Message || "Are you sure you want to remove this item?")) {
+        utils.removeItems(CloudDRI, ItemId, true, Callback);
+      }
+      return;
+    }
+    if (data.Success === true) {
+      utils.hideLoader();
+      utils.showSnackbar(data.Message || "Item removed successfully", "success");
+      if (typeof Callback === "function") {
+        Callback();
+      }
+      return;
+    }
+    utils.hideLoader();
+    utils.showSnackbar(data.Message || "Remove failed", "error");
+  })
+  .catch(err => {
+    utils.hideLoader();
+    utils.showSnackbar("Something went wrong while removing item", "error");
   });
 };
 var drawTable = function (O) {
@@ -225,5 +258,6 @@ drawTable.prototype = {
       tbody.appendChild(tr);
     });
     return tbody;
-  }
+  },
+  
 };
