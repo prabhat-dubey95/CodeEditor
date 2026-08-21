@@ -68,12 +68,18 @@
         };
     },
     attachClickEvents: function () {
+        var self = this;
+
         var addItemBtn = document.getElementById("addItemsBtn");
         var editItemRightBtn = document.getElementById("addItemsRightBtn");
         var cancelItemBtn = document.getElementById("cancelItemBtn");
         var itemPopup = document.getElementById("itemPopup");
         var contextPopup = document.getElementById("contextPopup");
         var cancelContextBtn = document.getElementById("cancelContextBtn");
+
+        var pushQABtn = document.getElementById("pushToQABtn");
+        var pushPrereleaseBtn = document.getElementById("pushToPreBtn");
+        var pushLiveBtn = document.getElementById("pushToLiveBtn");
 
         if (cancelContextBtn && contextPopup) {
             cancelContextBtn.onclick = function () {
@@ -98,9 +104,6 @@
             editItemRightBtn.onclick = function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-
-                console.log("addItemsRightBtn clicked");
-
                 contextPopup.style.display = "flex";
             };
         }
@@ -110,6 +113,51 @@
                 if (event.target === contextPopup) {
                     contextPopup.style.display = "none";
                 }
+            };
+        }
+
+        // PUSH TO QA
+        if (pushQABtn) {
+            pushQABtn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (!self.cloudDRI) {
+                    utils.showSnackbar("Please select a cloud from left side first!");
+                    return;
+                }
+                self.pushQueueAction("QA",self.cloudDRI,true);
+            };
+        }
+
+        // PUSH TO PRERELEASE
+        if (pushPrereleaseBtn) {
+            pushPrereleaseBtn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!self.cloudDRI) {
+                    utils.showSnackbar("Please select a cloud from left side first!");
+                    return;
+                }
+                self.pushQueueAction("Prerelease",self.cloudDRI,true);
+            };
+        }
+
+        // PUSH TO LIVE
+        if (pushLiveBtn) {
+            pushLiveBtn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (!self.cloudDRI) {
+                    utils.showSnackbar("Please select a cloud from left side first");
+                    return;
+                }
+                var confirmed = confirm("Are you sure, you wish to push this queue to live?");
+                if (!confirmed) {
+                    return;
+                }
+                self.pushQueueAction("Live",self.cloudDRI,true);
             };
         }
     },
@@ -161,13 +209,11 @@
                 return;
             }
             self.mainCloudDRI = cloud.DRI;
-            console.log("Loading Push Queue list from API");
             var data = await utils.getItems(cloud.DRI,"Name||Description||Created By||Created On||Last Pushed To||Last Pushed On||Push Queue Group",true,1,9999);
             var clouds = data && data.Results? data.Results: [];
             self.pushQueueClouds = clouds;
             self.isDataLoaded = true;
 
-            console.log("Push Queue list loaded:",clouds.length);
             self.initializeGroupDropdown();
             self.setupCloudSearch();
 
@@ -185,9 +231,11 @@
     restoreSelectedQueue: function () {
         var self = this;
         var queues = self.pushQueueClouds || [];
+
         if (!queues.length) {
             return;
         }
+
         var savedDRI = localStorage.getItem("activePushQueue");
         var selectedItem = null;
 
@@ -196,6 +244,7 @@
                 return (item.DRI === savedDRI ||item["Direct Resource Identifier"] === savedDRI);
             });
         }
+
         if (!selectedItem && self.selectedCloudDRI) {
             selectedItem = queues.find(function (item) {
                 return (item.DRI === self.selectedCloudDRI ||item["Direct Resource Identifier"] === self.selectedCloudDRI);
@@ -205,20 +254,29 @@
         if (!selectedItem) {
             selectedItem = queues[0];
         }
-
         var selectedDRI = selectedItem.DRI ||selectedItem["Direct Resource Identifier"];
+
         if (!selectedDRI) {
             return;
         }
-        self.selectedCloud = selectedItem;
 
+        self.selectedCloud = selectedItem;
         self.selectedCloudName = selectedItem.Name || "Unnamed";
 
         self.selectedCloudDRI = selectedDRI;
         self.cloudDRI = selectedDRI;
-        self.drawCloudList(queues,true);
+        var commonLabel = document.getElementById("commonSourceLabel");
+
+        if (commonLabel) {
+            var label = self.selectedCloudName;
+            if (self.selectedGroupName) {
+                label +=" (Group : " +self.selectedGroupName +")";
+            }
+            commonLabel.textContent = label;
+        }
+        self.drawCloudList(queues, true);
     },
-    drawCloudList: async function (items, restoreOnly) {
+    drawCloudList: async function (items) {
         var cloudList = document.getElementById("cloudList");
         if (!cloudList) {
             return;
@@ -256,7 +314,6 @@
                 cloudList.querySelectorAll(".-cloud-item").forEach(function (x) {
                     x.classList.remove("selected");
                     x.classList.remove("active-item");
-
                 });
 
                 row.classList.add("selected");
@@ -275,7 +332,6 @@
                 if (self.lastLoadedTableDRI !== cloudDRI) {
                     await self.loadTable(cloudDRI);
                 } else {
-                    console.log("Same queue selected - using table cache");
                     self.renderTable(self.tableItems || []);
                     self.setupTableSearch();
                 }
@@ -293,7 +349,6 @@
             if (self.lastLoadedTableDRI !== selectedDRI) {
                 await self.loadTable(selectedDRI);
             } else {
-                console.log("Restored queue already loaded - no API call");
                 self.renderTable(self.tableItems || []);
                 self.setupTableSearch();
             }
@@ -319,7 +374,7 @@
             }
         }
     },
-    loadTable: async function (cloudDRI) {
+    loadTable: async function (cloudDRI, refresh = false) {
         if (!cloudDRI) {
             console.warn("Queue DRI missing");
             return;
@@ -341,15 +396,40 @@
 
         self.cloudDRI = cloudDRI;
 
+        // Restore selected queue name when coming back from another tab
+        if (!self.selectedCloudName && Array.isArray(self.pushQueueClouds)) {
+            var selectedQueue = self.pushQueueClouds.find(function (item) {
+                var dri = item.DRI || item["Direct Resource Identifier"] || "";
+                return String(dri) === String(cloudDRI);
+            });
+
+            if (selectedQueue) {
+                self.selectedCloud = selectedQueue;
+                self.selectedCloudName = selectedQueue.Name || "Unnamed";
+                self.selectedCloudDRI = cloudDRI;
+            }
+        }
+
+        // Restore Common Source Label
         if (commonLabel) {
-            var label = self.selectedCloudName || "";
+            var label = self.selectedCloudName || (self.selectedCloud && self.selectedCloud.Name) ||"Push Queue";
             if (self.selectedGroupName) {
                 label += " (Group : " + self.selectedGroupName + ")";
             }
             commonLabel.textContent = label;
         }
-        if (self.lastLoadedTableDRI === cloudDRI && Array.isArray(self.tableItems)) {
-            console.log("Using cached Push Queue table:",cloudDRI);
+
+        // Only refresh button should clear cache
+        if (refresh) {
+            if (self.tableCache) {
+                self.tableCache.delete(cloudDRI);
+            }
+            self.tableItems = [];
+            self.lastLoadedTableDRI = null;
+        }
+
+        // Use current table cache
+        if (!refresh && self.lastLoadedTableDRI === cloudDRI &&Array.isArray(self.tableItems)) {
 
             box.style.display = "block";
             self.renderTable(self.tableItems);
@@ -357,22 +437,22 @@
             self.loadLastPushInfo(cloudDRI);
             return;
         }
-        if (self.tableCache && self.tableCache.has(cloudDRI)) {
-            console.log("Using table cache:",cloudDRI);
+
+        // Use Map cache
+        if (!refresh && self.tableCache && self.tableCache.has(cloudDRI)) {
+
             self.tableItems = self.tableCache.get(cloudDRI);
             self.lastLoadedTableDRI = cloudDRI;
 
             box.style.display = "block";
-
             self.renderTable(self.tableItems);
             self.setupTableSearch();
-              self.loadLastPushInfo(cloudDRI);
-
+            self.loadLastPushInfo(cloudDRI);
             return;
         }
 
-        if (self.tableLoadingPromises && self.tableLoadingPromises.has(cloudDRI)) {
-            console.log("Same Push Queue table is already loading. Reusing request:",cloudDRI);
+        // Prevent duplicate API request
+        if (self.tableLoadingPromises &&self.tableLoadingPromises.has(cloudDRI)) {
             return self.tableLoadingPromises.get(cloudDRI);
         }
         var loadPromise = (async function () {
@@ -380,9 +460,8 @@
             utils.showContextLoader();
 
             try {
-                console.log("Loading Push Queue table from API:",cloudDRI);
                 var data = await utils.getItems(cloudDRI,"Name||Created By||Created On",true,1,9999);
-                var items = data && data.Results ? data.Results : [];
+                var items = data && data.Results? data.Results: [];
                 self.tableItems = items;
                 self.lastLoadedTableDRI = cloudDRI;
 
@@ -390,27 +469,27 @@
                     self.tableCache = new Map();
                 }
 
-                self.tableCache.set(cloudDRI,items);
-                box.style.display = "block";
+                self.tableCache.set(cloudDRI, items);
 
+                box.style.display = "block";
                 self.renderTable(items);
                 self.setupTableSearch();
                 self.loadLastPushInfo(cloudDRI);
-                console.log("Push Queue table loaded successfully:",cloudDRI);
+
             } catch (err) {
                 console.error("Push Queue table load error:",err);
                 self.tableItems = [];
                 self.renderTable([]);
+
             } finally {
                 utils.hideContextLoader();
                 self.tableLoadingPromises.delete(cloudDRI);
             }
         })();
-        self.tableLoadingPromises.set(cloudDRI,loadPromise);
+        self.tableLoadingPromises.set(cloudDRI, loadPromise);
         return loadPromise;
     },
     resetCommonContextBox: function () {
-        console.log("PUSH QUEUE resetCommonContextBox CALLED");
         var box = document.getElementById("commonContextBox");
         var label = document.getElementById("commonSourceLabel");
         var search = document.getElementById("commonSearchInput");
@@ -638,7 +717,8 @@
         useFetch(linkUrl)
         .then((res) => res.json())
         .then(() => {
-        pushQueuesPlugin.loadTable(cloudDRI, true);
+        //pushQueuesPlugin.loadTable(cloudDRI, true);
+        pushQueuesPlugin.loadTable(cloudDRI);
         })
         .catch((err) => console.error("Error linking Context IDs:", err))
         .finally(() => {
@@ -751,29 +831,43 @@
         });
     },
     loadLastPushInfo: function (cloudDRI) {
-        if (!cloudDRI) return;
-
-        var pushQueueSection = document.getElementById("pushQueueSection");
+        if (!cloudDRI) {
+            return;
+        }
         var pushQueueInfo = document.getElementById("pushQueueInfo");
         var lastPushedTo = document.getElementById("lastPushedTo");
         var lastPushedOn = document.getElementById("lastPushedOn");
+        // Initially hide only the info section
+        if (pushQueueInfo) {
+            pushQueueInfo.style.display = "none";
+        }
 
-        var url = cloudDRI + "/GetFieldValues.json?Fields=Last Pushed To||Last Pushed On";
+        if (lastPushedTo) {
+            lastPushedTo.textContent = "-";
+        }
 
-        useFetch(url)
-        .then(function (res) {
-                return res.json();
-            })
-            .then(function (data) {
-                console.log("Last Push Info:", data);
-                if (lastPushedTo) {
-                    lastPushedTo.textContent = data["Last Pushed To"] || "-";
-                }
-                if (lastPushedOn) {
-                    var pushedOn = data["Last Pushed On"];
+        if (lastPushedOn) {
+            lastPushedOn.textContent = "-";
+        }
 
-                    if (pushedOn) {
-                        pushedOn = new Date(pushedOn).toLocaleString("en-IN", {
+        var url = cloudDRI +"/GetFieldValues.json?Fields=Last Pushed To||Last Pushed On";
+        useFetch(url).then(function (res) {
+            return res.json();
+        })
+        .then(function (data) {
+            var pushedTo = data && data["Last Pushed To"] ? String(data["Last Pushed To"]).trim() : "";
+            var pushedOn = data && data["Last Pushed On"]? String(data["Last Pushed On"]).trim(): "";
+            if (lastPushedTo) {
+                lastPushedTo.textContent = pushedTo || "-";
+            }
+
+            if (lastPushedOn) {
+                var formattedDate = pushedOn;
+                if (pushedOn) {
+                    var parsedDate = new Date(pushedOn);
+
+                    if (!isNaN(parsedDate.getTime())) {
+                        formattedDate = parsedDate.toLocaleString("en-IN",{
                             day: "2-digit",
                             month: "short",
                             year: "numeric",
@@ -782,20 +876,24 @@
                             hour12: true
                         });
                     }
-                    lastPushedOn.textContent = pushedOn || "-";
                 }
+                lastPushedOn.textContent = formattedDate || "-";
+            }
+            var hasPushedTo = pushedTo && pushedTo !== "-" && pushedTo.toLowerCase() !== "null" && pushedTo.toLowerCase() !== "undefined";
+            var hasPushedOn = pushedOn && pushedOn !== "-" && pushedOn.toLowerCase() !== "null" && pushedOn.toLowerCase() !== "undefined";
 
-                if (pushQueueSection) {
-                    pushQueueSection.style.display = "block";
-                }
-
-                if (pushQueueInfo) {
-                    pushQueueInfo.style.display = "block";
-                }
-            })
-            .catch(function (err) {
-                console.error("Last Push Info Error:", err);
-            });
+            // ONLY pushQueueInfo show/hide
+            if (pushQueueInfo) {
+                pushQueueInfo.style.display = (hasPushedTo || hasPushedOn) ? "block" : "none";
+            }
+        })
+        .catch(function (err) {
+            console.error("Last Push Info Error:",err);
+            // Only hide info, never hide push buttons
+            if (pushQueueInfo) {
+                pushQueueInfo.style.display = "none";
+            }
+        });
     },
     filterPushQueuesByGroup: function () {
         var self = this;

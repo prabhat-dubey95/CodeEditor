@@ -31,13 +31,6 @@
     border-right:1px solid #ddd;
     background:#f0f0f0;
 }
-
-#cloudList {
-    /* flex: 1; */
-    overflow-y: auto;
-    list-style-type: none;
-}
-
 .items-section{
     flex:1;
     display:flex;
@@ -326,12 +319,12 @@ form button:hover {
     margin: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    list-style-type: none;
 }
 #pushQueueItemsSection {
     margin: 0;
     padding: 0;
 }
-
 #pushQueueItemsTable {
     margin: 0;
     width: 100%;
@@ -347,9 +340,6 @@ form button:hover {
     flex-direction: column;
     min-height: 0;
     height: 100%;
-}
-#cloudList {
-    overflow-y: auto;
 }
 #pushQueueItemsSection {
     flex: 1;
