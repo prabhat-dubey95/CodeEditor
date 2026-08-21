@@ -198,19 +198,30 @@ body.logged-in #loginOverlay {
   overflow: hidden;
   background: #1f2430;
 }
-.project-header {
-  padding: 2px 5px 2px 5px;
-}
 .-project-plus-btn-div {
+  width: 28px;
+  min-width: 28px;
+  max-width: 30px;
+  height: 28px;
   cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
 }
-.project-header,.context-header,.panel-section-title {
+.context-header,.panel-section-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 5px;
   margin: 0;
   color: #fff;
+}
+.project-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 5px;
+  justify-content: space-between;
 }
 .context-header {
   border-top: 1px solid #3c3c3c;
@@ -252,12 +263,6 @@ body.logged-in #loginOverlay {
   text-align: center;
   outline: none;
 }
-/* .-context-identifier-editor-dropdown-div {
-  gap: 5px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-} */
 .editor-dropdown,.editor-input,.enterprise-input {
   width: 100%;
   min-width: 0;
@@ -275,7 +280,6 @@ body.logged-in #loginOverlay {
   align-items: center;
   padding: 5px;
 }
-
 .-context-input-box,#projectFilesSection,#filesSection,#pushQueueItemsSection {
   flex: 0 0 430px;
   height: 430px;
@@ -290,7 +294,6 @@ body.logged-in #loginOverlay {
 }
 .hierarchy-tree {
   padding-left: 5px;
-  overflow: auto;
   border-top: 1px solid #333;
   background: #1f2430;
   color: #fff;
@@ -451,7 +454,7 @@ body.logged-in #loginOverlay {
   width: 28px;
   min-width: 28px;
 }
-.project-panel.collapsed .project-header,.project-panel.collapsed .project-body {
+.project-panel.collapsed .project-panel.collapsed .project-body {
   display: none;
 }
 .project-panel.collapsed .project-collapsed-label {
@@ -695,7 +698,6 @@ body.logged-in #loginOverlay {
 #cloudList {
   flex: 1;
   min-height: 0;
-  overflow: auto;
 }
 #pushQueueItemsSection {
   display: none;

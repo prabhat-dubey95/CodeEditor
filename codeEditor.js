@@ -55,7 +55,9 @@ codeEditor.prototype = {
     this.allContexts = [];
     this.currentContextId = null;
     this.monacoEditor = null;
+
     this.lastContextSource = null;
+    this.restoreLastContextSource();
     this.activeLeftPanelTab = "liveActions";
 
     // IMPORTANT: load saved project FIRST
@@ -87,9 +89,13 @@ codeEditor.prototype = {
         Category: {},
         CloudType: {}
       };
+
       this.mode = e.target.value;
+
       await this.rebuildLeftPanel();
+
       var commonContextBox = document.getElementById("commonContextBox");
+
       switch (this.activeTabType) {
         case "pushQueues":
           this.openPushQueuesTab(true);
@@ -101,17 +107,21 @@ codeEditor.prototype = {
 
         case "projects":
           if (this.selectedProjectFolderData) {
-            this.showProjectFolderFiles(this.selectedProjectFolderData, true);
+            this.showProjectFolderFiles(
+              this.selectedProjectFolderData,
+              true
+            );
           }
           break;
 
         default:
           await this.refreshCommonSection();
+
           if (commonContextBox) {
             commonContextBox.style.display = "block";
           }
           break;
-        }
+      }
     });
 
     document.addEventListener("keydown", async (e) => {
@@ -313,22 +323,12 @@ codeEditor.prototype = {
           panel.classList.toggle("active",panel.id === targetPanelId);
         });
         if (targetPanel === "liveActions") {
-
-          if (this.lastContextSource) {
-            var source = this.lastContextSource;
-            var cacheKey = (this.selectedEnterprise?.Id || "default") + "_" + this.mode + "_" + source.action +"_" + source.id;
-            var list = this.contextCache?.[source.action]?.[cacheKey] ||this.contextCache?.[source.action]?.[source.id] ||[];
-            if (list.length) {
-              this.renderContextsFromCache(list);
-            }
-          }
-
+          await this.restoreLiveActionsContext();
           if (this.monacoEditor) {
             this.monacoEditor.layout();
           }
           return;
         }
-
         if (targetPanel === "pushQueues") {
           this.openPushQueuesTab(true);
           if (this.monacoEditor) {
@@ -374,8 +374,90 @@ codeEditor.prototype = {
       });
     });
   },
+  restoreLiveActionsContext: async function () {
+    var source = this.lastContextSource;
+    if (!source) {
+      console.log("No previous LiveActions selection.");
+      return;
+    }
+    if (!source.action || !source.id) {
+      console.warn("Invalid LiveActions source:",source);
+      return;
+    }
+    var box = document.getElementById("commonContextBox");
+    var label = document.getElementById("commonSourceLabel");
+    var container = document.getElementById("commonTableContainer");
+    if (box) {
+    box.style.display = "block";
+    }
+
+    if (label) {
+      this.setContextSourceLabel(source.action,source.name || "");
+    }
+
+    if (container) {
+      container.innerHTML = "";
+    }
+
+    try {
+      switch (source.action) {
+        case "ObjectType":
+          await this.loadContexts(source.id,"ObjectType");
+          break;
+        case "Category":
+          await this.loadCategoryContexts(source.id);
+          break;
+
+        case "CloudType":
+          await this.loadCloudTypeContexts(source.id);
+          break;
+
+        default:
+          console.warn("Unknown context source:",source.action);
+      }
+
+    } catch (error) {
+      console.error("Failed to restore LiveActions context:",error);
+    }
+  },
+  restoreSelectedHierarchyNode: function () {
+    var source = this.lastContextSource;
+
+    if (!source || !source.id) {
+      return;
+    }
+
+    document.querySelectorAll(".tree-selected").forEach(function (el) {
+      el.classList.remove("tree-selected");
+    });
+
+    var selector = "";
+
+    if (source.action === "ObjectType") {
+      selector ='#OT [data-context-id="' + source.id + '"]';
+    }
+
+    if (source.action === "Category") {
+      selector = '#Cat [data-context-id="' +source.id +'"]';
+    }
+
+    if (source.action === "CloudType") {
+      selector = '#Cat [data-context-id="' + source.id +'"]';
+    }
+
+    if (!selector) {
+      return;
+    }
+
+    var label = document.querySelector(selector);
+    if (label) {
+      var node = label.parentElement;
+      if (node) {
+        node.classList.add("tree-selected");
+      }
+    }
+  },
   resetCommonContextBox: function () {
-    console.log("CODE EDITOR resetCommonContextBox CALLED");
     var box = document.getElementById("commonContextBox");
     var label = document.getElementById("commonSourceLabel");
     var search = document.getElementById("commonSearchInput");
@@ -464,6 +546,7 @@ codeEditor.prototype = {
       document.body.classList.remove("no-scroll");
       return;
     }
+
     var loginSubmit = document.getElementById("loginSubmit");
     var loginEmail = document.getElementById("loginEmail");
     var loginPassword = document.getElementById("loginPassword");
@@ -471,14 +554,22 @@ codeEditor.prototype = {
     if (!loginSubmit || !loginEmail || !loginPassword) {
       return;
     }
+
+    // Make both fields required
+    loginEmail.required = true;
+    loginPassword.required = true;
+
     document.body.classList.add("no-scroll");
+
     loginSubmit.addEventListener("click", () => this.handleLogin());
+
     loginPassword.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
         this.handleLogin();
       }
     });
+
     loginEmail.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -487,16 +578,35 @@ codeEditor.prototype = {
     });
   },
   handleLogin: async function () {
-    var email = document.getElementById("loginEmail").value.trim();
-    var password = document.getElementById("loginPassword").value;
+    var loginEmail = document.getElementById("loginEmail");
+    var loginPassword = document.getElementById("loginPassword");
     var error = document.getElementById("loginError");
     var loginSubmit = document.getElementById("loginSubmit");
 
-    if (!email || !password) {
-      error.textContent = "Enter both email and password.";
+    var email = loginEmail.value.trim();
+    var password = loginPassword.value;
+
+    // Clear previous validation
+    loginEmail.setCustomValidity("");
+    loginPassword.setCustomValidity("");
+    error.textContent = "";
+
+    // Email required
+    if (!email) {
+      loginEmail.setCustomValidity("Email is required.");
+      loginEmail.reportValidity();
+      loginEmail.focus();
       return;
     }
-    error.textContent = "";
+
+    // Password required
+    if (!password.trim()) {
+      loginPassword.setCustomValidity("Password is required.");
+      loginPassword.reportValidity();
+      loginPassword.focus();
+      return;
+    }
+
     loginSubmit.disabled = true;
     loginSubmit.textContent = "Signing in...";
 
@@ -512,16 +622,18 @@ codeEditor.prototype = {
           Password: password
         })
       });
+
       var data = await response.json();
 
       if (!data || !data.Result || data.Result === false) {
         throw new Error("Login failed : " + domain);
       }
+
       return data;
     }
+
     try {
       // Main Login (Current Environment)
-      //var data = await loginToServer(GlobalDomain);
       var loginDomain = this.getLoginDomain();
       var data = await loginToServer(loginDomain);
 
@@ -534,22 +646,23 @@ codeEditor.prototype = {
       localStorage.setItem("userData", JSON.stringify(data.Result));
       localStorage.setItem("loginUserName", email);
       localStorage.setItem("loginPassword", password);
+
       if (loginDomain.toLowerCase().indexOf("prerelease") === -1) {
         try {
           await loginToServer("http://prerelease.liveplatform.com");
-        }
-        catch (e) {
+        } catch (e) {
           console.warn("Prerelease login skipped", e);
         }
       }
+
       if (loginDomain.toLowerCase().indexOf("dev") === -1) {
         try {
           await loginToServer("http://dev.liveplatform.com");
-        }
-        catch (e) {
+        } catch (e) {
           console.warn("Dev login skipped", e);
         }
       }
+
       document.body.classList.add("logged-in");
       document.body.classList.remove("no-scroll");
     }
@@ -846,8 +959,12 @@ codeEditor.prototype = {
           this.setSelectedNode(div);
           this.setContextSourceLabel("ObjectType",item.DisplayName || item.Name);
           this.lastContextSource = {
-            action: "ObjectType", id: item.Id
+              action: "ObjectType",
+              id: item.Id,
+              name: item.DisplayName || item.Name || ""
           };
+
+          this.saveLastContextSource();
           await this.loadContexts(item.Id, "ObjectType");
         });
         otDiv.appendChild(div);
@@ -904,16 +1021,26 @@ codeEditor.prototype = {
           this.setSelectedNode(div);
           if (name === "Categories") {
             this.setContextSourceLabel("Category","Categories");
+
             this.lastContextSource = {
-              action: "Category",
-              id: this.topLevelCategory
+                action: "Category",
+                id: this.topLevelCategory,
+                name: "Categories"
             };
+            this.saveLastContextSource();
             await this.loadCategoryContexts(this.topLevelCategory);
             return;
           }
 
           if (name === "Cloud Types") {
             this.setContextSourceLabel("CloudType","Cloud Types");
+            this.lastContextSource = {
+              action: "CloudType",
+              id: this.topLevelCloudType,
+              name: "Cloud Types"
+            };
+
+            this.saveLastContextSource();
             await this.loadCloudTypeContexts(this.topLevelCloudType);
             return;
           }
@@ -967,30 +1094,23 @@ codeEditor.prototype = {
           <span class="label">${child["Formatted Name"]}</span>
         `;
         div.dataset.open = "false";
-        // div.addEventListener("click", async (e) => {
-        //   e.stopPropagation();
-        //   await this.loadChildNodes(div, child.HierarchyPosition);
-        // });
+
         div.querySelector(".toggle").addEventListener("click", async (e) => {
           e.stopPropagation();
           await this.loadChildNodes(div, child.HierarchyPosition);
         });
-        // div.querySelector(".label").addEventListener("click", async (e) => {
-        //   e.stopPropagation();
-        //   this.setSelectedNode(div);
-        //   var categoryName =item.DisplayName ||item["Formatted Name"] ||item.Name ||div.querySelector(".label").textContent.trim();
-        //   this.setContextSourceLabel("Category", categoryName);
-        //   await this.loadCategoryContexts(item.Id);
-        // });
         div.querySelector(".label").addEventListener("click", async (e) => {
           e.stopPropagation();
           this.setSelectedNode(div);
           this.setContextSourceLabel("Category",child["Formatted Name"]);
 
           this.lastContextSource = {
-            action: "Category",
-            id: child.Id || child.HierarchyPosition
+              action: "Category",
+              id: child.Id || child.HierarchyPosition,
+              name: child["Formatted Name"] || ""
           };
+
+          this.saveLastContextSource();
           await this.loadCategoryContexts(child.Id || child.HierarchyPosition);
         });
         container.appendChild(div);
@@ -1068,8 +1188,11 @@ codeEditor.prototype = {
           this.setContextSourceLabel("CloudType",child["Formatted Name"] ||child.DisplayName ||child.Name);
           this.lastContextSource = {
             action: "CloudType",
-            id: child.Id || child.HierarchyPosition
+            id: child.Id || child.HierarchyPosition,
+            name: child["Formatted Name"] || child.Name || ""
           };
+
+          this.saveLastContextSource();
           await this.loadCloudTypeContexts(child.Id || child.HierarchyPosition);
         });
         container.appendChild(div);
@@ -1080,6 +1203,37 @@ codeEditor.prototype = {
 
     } catch (err) {
       this.setToggleState(parentDiv, false);
+    }
+  },
+  saveLastContextSource: function () {
+    if (!this.lastContextSource) {
+      localStorage.removeItem("lastContextSource");
+      return;
+    }
+
+    try {
+      localStorage.setItem("lastContextSource",JSON.stringify(this.lastContextSource));
+    } catch (error) {
+      console.warn("Failed to save last context source:",error);
+    }
+  },
+  restoreLastContextSource: function () {
+    try {
+      var saved = localStorage.getItem("lastContextSource");
+      if (!saved) {
+        this.lastContextSource = null;
+        return;
+      }
+      var parsed = JSON.parse(saved);
+
+      if (!parsed ||!parsed.action ||!parsed.id) {
+        this.lastContextSource = null;
+        return;
+      }
+      this.lastContextSource = parsed;
+    } catch (error) {
+      console.warn("Failed to restore last context source:",error);
+      this.lastContextSource = null;
     }
   },
   loadChildNodes: async function (parentDiv, hpos) {
@@ -1162,17 +1316,15 @@ codeEditor.prototype = {
   },
   getApiResults: function (data) {
     if (!data) {
-        return [];
+      return [];
     }
-
     if (Array.isArray(data.Results)) {
-        return data.Results;
+      return data.Results;
     }
 
     if (Array.isArray(data)) {
-        return data;
+      return data;
     }
-
     return [];
   },
   getCurrentDomain: function () {
@@ -1813,13 +1965,13 @@ openContextInEditor: async function (contextId, contextName) {
 
       case "liveWebsite":
         if (this.selectedLiveWebsite) {
-          await this.loadLiveWebsiteFiles(this.selectedLiveWebsite);
+          await this.loadLiveWebsiteFiles(this.selectedLiveWebsite,true);
         }
         break;
 
       case "pushQueues":
         if (window.pushQueuesPlugin?.cloudDRI) {
-          await window.pushQueuesPlugin.loadTable(window.pushQueuesPlugin.cloudDRI);
+          await window.pushQueuesPlugin.loadTable(window.pushQueuesPlugin.cloudDRI,true);
         }
         break;
     }
@@ -3126,7 +3278,7 @@ openContextInEditor: async function (contextId, contextName) {
       GlobalDomain = oldDomain;
     }
   },
-  loadLiveWebsiteFiles: async function (library) {
+  loadLiveWebsiteFiles: async function (library, refresh = false) {
     if (!library) {
       return;
     }
@@ -3158,8 +3310,12 @@ openContextInEditor: async function (contextId, contextName) {
         this.liveWebsiteFilesCache = new Map();
       }
 
+      if (refresh) {
+        console.log("LiveWebsite refresh - clearing cache:",cacheKey);
+        this.liveWebsiteFilesCache.delete(cacheKey);
+      }
       // Already loaded
-      if (this.liveWebsiteFilesCache.has(cacheKey)) {
+      if (!refresh && this.liveWebsiteFilesCache.has(cacheKey)) {
         var cached = this.liveWebsiteFilesCache.get(cacheKey);
 
         // Promise still running
@@ -4033,6 +4189,97 @@ openContextInEditor: async function (contextId, contextName) {
     catch (error) {
       console.error("Remove project file error:", error);
       utils.showSnackbar("Failed to remove project file.", "error");
+    }
+  },
+  onModeChanged: async function (release) {
+    try {
+      if (!release || !this.versions || !this.versions[release]) {
+        console.warn("Invalid mode:", release);
+        return;
+      }
+
+      this.mode = release;
+      this.selectedMode = this.versions[release];
+
+      // Update custom dropdown selected text
+      var modeInput = document.getElementById("modeInput");
+      var modeDropdown = document.getElementById("modeDropdown");
+      var modeOptions = document.getElementById("modeOptions");
+
+      if (modeInput) {
+        var selectedText = modeInput.querySelector(".selected-text");
+        if (selectedText) {
+          selectedText.textContent = this.selectedMode.release +" - " +this.selectedMode.version;
+        }
+        modeInput.dataset.value = release;
+      }
+
+      // Highlight selected option
+      if (modeOptions) {
+        modeOptions.querySelectorAll(".mode-option").forEach(function (option) {
+          option.classList.remove("selected");
+        });
+        var selectedOption = modeOptions.querySelector('[data-value="' + release + '"]');
+        if (selectedOption) {
+          selectedOption.classList.add("selected");
+        }
+      }
+
+      // Close dropdown
+      if (modeDropdown) {
+        modeDropdown.style.display = "none";
+      }
+
+      // Clear environment dependent caches
+      this.nodeCache = {
+        OT: {},
+        Category: {},
+        CloudType: {}
+      };
+
+      this.contextCache = {
+        ObjectType: {},
+        Category: {},
+        CloudType: {}
+      };
+
+      this.contextLoading = {};
+      // Rebuild LiveActions
+      await this.rebuildLeftPanel();
+      var commonContextBox = document.getElementById("commonContextBox");
+
+      // Restore current panel
+      switch (this.activeLeftPanelTab) {
+        case "pushQueues":
+          await this.openPushQueuesTab(false);
+          break;
+
+        case "liveWebsite":
+          await this.openLiveWebsiteTab(false);
+          break;
+
+        case "projects":
+          if (this.selectedProjectFolderData) {
+            this.showProjectFolderFiles(this.selectedProjectFolderData,true);
+          }
+          break;
+
+        default:
+          await this.refreshCommonSection();
+
+          if (commonContextBox) {
+            commonContextBox.style.display = "block";
+          }
+          break;
+      }
+
+    } catch (err) {
+      console.error("onModeChanged error:", err);
+
+      if (typeof utils !== "undefined" && typeof utils.showSnackbar === "function"
+      ) {
+        utils.showSnackbar("Failed to change version","error");
+      }
     }
   },
 };
